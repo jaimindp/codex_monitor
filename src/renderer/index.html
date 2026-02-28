@@ -8,12 +8,26 @@
   </head>
   <body>
     <main class="app">
-      <h1>Monitor Electron App</h1>
-      <p>Scaffold is ready.</p>
+      <h1>Codex App Server Monitor</h1>
+      <p>Start and inspect <code>codex app-server</code> from Electron.</p>
       <div class="card">
         <p id="versions">Loading runtime versions...</p>
         <button id="ping-btn" type="button">Ping main process</button>
         <p id="ping-result"></p>
+      </div>
+      <div class="card">
+        <h2>Server Control</h2>
+        <label for="listen-input">Listen URL</label>
+        <input id="listen-input" type="text" value="stdio://" />
+        <div class="row">
+          <button id="start-btn" type="button">Start</button>
+          <button id="stop-btn" type="button">Stop</button>
+        </div>
+        <p id="server-status">Status: loading...</p>
+      </div>
+      <div class="card">
+        <h2>Logs</h2>
+        <pre id="log-output" class="logs"></pre>
       </div>
     </main>
     <script src="./renderer.js"></script>
