@@ -45,6 +45,8 @@ const mcpSummaryEl = document.getElementById("mcp-summary");
 const mcpTopMcpEl = document.getElementById("mcp-top-mcp");
 const mcpTopSkillsEl = document.getElementById("mcp-top-skills");
 const mcpFilesEl = document.getElementById("mcp-files");
+const mcpHourlyMcpEl = document.getElementById("mcp-hourly-mcp");
+const mcpHourlySkillsEl = document.getElementById("mcp-hourly-skills");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]"));
 const agentTaskIdInput = document.getElementById("agent-task-id");
@@ -222,6 +224,8 @@ function initializeMcpSkillTracking() {
   renderMcpList(mcpTopMcpEl, []);
   renderMcpList(mcpTopSkillsEl, []);
   renderMcpList(mcpFilesEl, []);
+  renderHourlyBars(mcpHourlyMcpEl, [], "No MCP calls in selected window.");
+  renderHourlyBars(mcpHourlySkillsEl, [], "No skill invocations in selected window.");
   loadMcpSkillSnapshot(true);
 }
 initializeOrchestratorControls();
@@ -857,7 +861,8 @@ async function loadMcpSkillSnapshot(isAutoLoad) {
   try {
     const snapshot = await window.monitor.mcpSkillTracking.getSnapshot({ days });
     renderMcpSnapshot(snapshot);
-    setMcpStatus(`MCP status: scanned ${snapshot.filesScanned} file(s) over ${snapshot.windowDays} day(s)`);
+    const windowDays = Number(snapshot?.days || snapshot?.windowDays || days);
+    setMcpStatus(`MCP status: scanned ${snapshot.filesScanned} file(s) over ${windowDays} day(s)`);
     setMcpLastUpdated(snapshot.generatedAt);
     updateLastRefresh("MCP + Skills");
   } catch (error) {
@@ -877,13 +882,14 @@ function renderMcpSnapshot(snapshot) {
   if (!snapshot) {
     return;
   }
+  const windowDays = Number(snapshot?.days || snapshot?.windowDays || MCP_DEFAULT_DAYS);
 
   renderMcpList(mcpSummaryEl, [
-    { label: "Window", value: `${snapshot.windowDays} day(s)` },
+    { label: "Window", value: `${windowDays} day(s)` },
     { label: "Files scanned", value: snapshot.filesScanned },
     { label: "Lines scanned", value: snapshot.linesScanned },
     { label: "MCP tool calls", value: snapshot.mcpToolCallsTotal },
-    { label: "Skill mentions", value: snapshot.skillMentionsTotal },
+    { label: "Skill invocations", value: snapshot.skillMentionsTotal },
     { label: "Parse errors", value: snapshot.parseErrors }
   ]);
 
@@ -904,10 +910,66 @@ function renderMcpSnapshot(snapshot) {
   const warningRows = Array.isArray(snapshot.warnings)
     ? snapshot.warnings.map((warning) => ({ label: "Warning", value: warning }))
     : [];
-  const fileRows = Array.isArray(snapshot.recentFiles)
-    ? snapshot.recentFiles.map((filePath) => ({ label: "File", value: filePath }))
-    : [];
+  const fileRows = Array.isArray(snapshot.topFiles)
+    ? snapshot.topFiles.map((item) => ({ label: item.name, value: item.count }))
+    : Array.isArray(snapshot.recentFiles)
+      ? snapshot.recentFiles.map((filePath) => ({ label: "File", value: filePath }))
+      : [];
   renderMcpList(mcpFilesEl, [...warningRows, ...fileRows]);
+
+  const hourlyRows = Array.isArray(snapshot.hourlyRollup) ? snapshot.hourlyRollup : [];
+  const mcpHourly = hourlyRows.map((row) => ({
+    label: formatHourLabel(row?.hour),
+    value: Number(row?.mcpToolCalls || 0)
+  }));
+  const skillHourly = hourlyRows.map((row) => ({
+    label: formatHourLabel(row?.hour),
+    value: Number(row?.skillInvocations || 0)
+  }));
+  renderHourlyBars(mcpHourlyMcpEl, mcpHourly, "No MCP calls in selected window.");
+  renderHourlyBars(mcpHourlySkillsEl, skillHourly, "No skill invocations in selected window.");
+}
+
+function renderHourlyBars(container, rows, emptyMessage) {
+  if (!container) {
+    return;
+  }
+
+  const chartRows = Array.isArray(rows) ? rows : [];
+  const maxValue = chartRows.reduce((acc, row) => Math.max(acc, Number(row?.value || 0)), 0);
+  if (!chartRows.length || maxValue <= 0) {
+    container.innerHTML = `<p class="mcp-chart-empty">${escapeHtml(String(emptyMessage || "No data"))}</p>`;
+    return;
+  }
+
+  container.innerHTML = chartRows
+    .map((row) => {
+      const value = Math.max(0, Number(row?.value || 0));
+      const widthPercent = Math.max(4, Math.round((value / maxValue) * 100));
+      return `
+        <div class="mcp-bar-row">
+          <span class="mcp-bar-label">${escapeHtml(String(row?.label || "-"))}</span>
+          <div class="mcp-bar-track"><span class="mcp-bar-fill" style="width:${widthPercent}%"></span></div>
+          <span class="mcp-bar-value">${formatCount(value)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function formatHourLabel(isoTimestamp) {
+  if (!isoTimestamp) {
+    return "-";
+  }
+  const date = new Date(isoTimestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric"
+  });
 }
 
 function renderMcpList(containerEl, items) {

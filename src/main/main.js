@@ -44,6 +44,10 @@ const USAGE_SESSION_LIST_LIMIT = 200;
 const SESSION_PARSE_CONCURRENCY = 8;
 const USAGE_SNAPSHOT_VERSION = 1;
 const USAGE_ROLLUP_WINDOW_HOURS = 24;
+const MCP_TRACKING_MIN_DAYS = 1;
+const MCP_TRACKING_MAX_DAYS = 30;
+const MCP_TRACKING_DEFAULT_DAYS = 7;
+const MCP_TRACKING_MAX_FILES = 5000;
 
 const DEFAULT_PRICING_CONFIG = {
   fallbackRateUsdPer1MTokens: 5,
@@ -420,6 +424,243 @@ async function getGithubRepoDiscoveryReport(roots, options = {}) {
 
 function getCodexSessionsRootPath() {
   return path.join(os.homedir(), ".codex", "sessions");
+}
+
+function clampMcpTrackingDays(rawDays) {
+  const parsed = Number(rawDays);
+  if (!Number.isFinite(parsed)) {
+    return MCP_TRACKING_DEFAULT_DAYS;
+  }
+  const rounded = Math.round(parsed);
+  return Math.min(MCP_TRACKING_MAX_DAYS, Math.max(MCP_TRACKING_MIN_DAYS, rounded));
+}
+
+function tryParseJson(value) {
+  if (value && typeof value === "object") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function bumpCounter(counter, key, amount = 1) {
+  if (!key) {
+    return;
+  }
+  const previous = Number(counter.get(key) || 0);
+  counter.set(key, previous + amount);
+}
+
+function topCounterEntries(counter, limit = 10) {
+  return Array.from(counter.entries())
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function extractSkillsFromCommand(commandText) {
+  const command = String(commandText || "");
+  if (!command) {
+    return [];
+  }
+  const found = new Set();
+  SKILL_NAMES.forEach((skillName) => {
+    if (command.includes(`${skillName}/SKILL.md`)) {
+      found.add(skillName);
+    }
+  });
+  return Array.from(found);
+}
+
+function extractSkillInvocationsFromFunctionCall(payload) {
+  const functionName = String(payload?.name || "");
+  if (!functionName) {
+    return [];
+  }
+
+  const parsedArgs = tryParseJson(payload?.arguments);
+  const found = new Set();
+
+  if (functionName === "exec_command") {
+    const cmd = String(parsedArgs?.cmd || "");
+    extractSkillsFromCommand(cmd).forEach((skillName) => found.add(skillName));
+  } else if (functionName === "multi_tool_use.parallel") {
+    const toolUses = Array.isArray(parsedArgs?.tool_uses) ? parsedArgs.tool_uses : [];
+    toolUses.forEach((toolUse) => {
+      const cmd = String(toolUse?.parameters?.cmd || "");
+      extractSkillsFromCommand(cmd).forEach((skillName) => found.add(skillName));
+    });
+  }
+
+  return Array.from(found);
+}
+
+function getHourBucket(timestamp) {
+  const parsed = Date.parse(String(timestamp || ""));
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  const date = new Date(parsed);
+  date.setUTCMinutes(0, 0, 0);
+  return date.toISOString();
+}
+
+function bumpHourCounter(hourCounter, hourKey, fieldName, amount = 1) {
+  if (!hourKey || !fieldName) {
+    return;
+  }
+  const current = hourCounter.get(hourKey) || { hour: hourKey, mcpToolCalls: 0, skillInvocations: 0 };
+  current[fieldName] = Number(current[fieldName] || 0) + amount;
+  hourCounter.set(hourKey, current);
+}
+
+async function listSessionEventFiles(rootPath) {
+  const files = [];
+  const stack = [rootPath];
+
+  while (stack.length > 0 && files.length < MCP_TRACKING_MAX_FILES) {
+    const currentPath = stack.pop();
+    let entries = [];
+    try {
+      entries = await fs.readdir(currentPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    entries.forEach((entry) => {
+      const fullPath = path.join(currentPath, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(fullPath);
+        return;
+      }
+      if (!entry.isFile()) {
+        return;
+      }
+      if (entry.name.endsWith(".jsonl")) {
+        files.push(fullPath);
+      }
+    });
+  }
+
+  return files.sort();
+}
+
+async function getMcpSkillTrackingSnapshot(rawDays) {
+  const days = clampMcpTrackingDays(rawDays);
+  const nowMs = Date.now();
+  const cutoffMs = nowMs - days * 24 * 60 * 60 * 1000;
+  const sessionsRoot = getCodexSessionsRootPath();
+
+  const snapshot = {
+    version: 2,
+    status: "ok",
+    generatedAt: new Date(nowMs).toISOString(),
+    days,
+    filesScanned: 0,
+    linesScanned: 0,
+    parseErrors: 0,
+    mcpToolCallsTotal: 0,
+    skillMentionsTotal: 0,
+    topMcpTools: [],
+    topSkills: [],
+    topFiles: [],
+    hourlyRollup: [],
+    sources: {
+      sessionsRoot
+    },
+    warnings: []
+  };
+
+  try {
+    await fs.access(sessionsRoot, fsSync.constants.R_OK);
+  } catch {
+    snapshot.status = "empty";
+    snapshot.warnings.push(`Sessions path not found: ${sessionsRoot}`);
+    return snapshot;
+  }
+
+  const files = await listSessionEventFiles(sessionsRoot);
+  const mcpCounter = new Map();
+  const skillCounter = new Map();
+  const fileCounter = new Map();
+  const hourCounter = new Map();
+
+  for (const filePath of files) {
+    snapshot.filesScanned += 1;
+    const stream = fsSync.createReadStream(filePath, { encoding: "utf8" });
+    const lineReader = readline.createInterface({
+      input: stream,
+      crlfDelay: Infinity
+    });
+
+    for await (const line of lineReader) {
+      const trimmed = String(line || "").trim();
+      if (!trimmed) {
+        continue;
+      }
+      snapshot.linesScanned += 1;
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        snapshot.parseErrors += 1;
+        continue;
+      }
+
+      if (parsed?.type !== "response_item" || parsed?.payload?.type !== "function_call") {
+        continue;
+      }
+
+      const timestampValue = parsed?.timestamp || parsed?.payload?.timestamp;
+      const parsedTimestampMs = Date.parse(String(timestampValue || ""));
+      if (Number.isFinite(parsedTimestampMs) && parsedTimestampMs < cutoffMs) {
+        continue;
+      }
+      const hourKey = getHourBucket(timestampValue);
+
+      const functionName = String(parsed.payload?.name || "").trim().toLowerCase();
+      if (functionName.startsWith("mcp__")) {
+        bumpCounter(mcpCounter, functionName);
+        snapshot.mcpToolCallsTotal += 1;
+        bumpCounter(fileCounter, path.basename(filePath));
+        bumpHourCounter(hourCounter, hourKey, "mcpToolCalls", 1);
+      }
+
+      const invokedSkills = extractSkillInvocationsFromFunctionCall(parsed.payload);
+      if (invokedSkills.length > 0) {
+        invokedSkills.forEach((skillName) => {
+          bumpCounter(skillCounter, skillName);
+          snapshot.skillMentionsTotal += 1;
+          bumpCounter(fileCounter, path.basename(filePath));
+          bumpHourCounter(hourCounter, hourKey, "skillInvocations", 1);
+        });
+      }
+    }
+  }
+
+  snapshot.topMcpTools = topCounterEntries(mcpCounter, 12);
+  snapshot.topSkills = topCounterEntries(skillCounter, 12);
+  snapshot.topFiles = topCounterEntries(fileCounter, 8);
+  snapshot.hourlyRollup = Array.from(hourCounter.values()).sort((left, right) =>
+    String(left.hour).localeCompare(String(right.hour))
+  );
+  if (snapshot.filesScanned === 0) {
+    snapshot.status = "empty";
+    snapshot.warnings.push("No Codex session event files were found.");
+  }
+  return snapshot;
 }
 
 function getUsageSnapshotPath() {
