@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access"
+    "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
+    "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js"
   },
   "keywords": [
     "electron",

@@ -45,6 +45,29 @@ npm install
 npm run start
 ```
 
+## Ticket Orchestration (Plan -> Implement -> Test -> PR -> Merge)
+
+Use the built-in orchestrator to run a full ticket workflow with three Codex phases:
+
+1. Plan agent (`gpt-5.3-codex` + low effort)
+2. Implementation agent (`gpt-5.3-codex` + medium effort)
+3. Test agent (`gpt-5.3-codex` + high effort)
+
+Then the orchestrator can commit, push, create a PR, and optionally enable auto-merge.
+
+```bash
+npm run orchestrate:ticket -- \
+  --task-id hack-38 \
+  --task-title "agent-orchestrated-end-to-end-ticket-flow" \
+  --ticket-file docs/orchestrator/TICKET_BRIEF_TEMPLATE.md
+```
+
+Runbook and templates:
+- `docs/orchestrator/Agent-Orchestrator-Runbook.md`
+- `docs/orchestrator/TICKET_BRIEF_TEMPLATE.md`
+- `scripts/orchestrator/templates/*`
+- `scripts/orchestrator/schemas/*`
+
 ## Codex app-server integration
 
 - Requires the `codex` CLI on your `PATH`.
