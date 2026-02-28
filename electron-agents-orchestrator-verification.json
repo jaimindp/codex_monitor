@@ -3,14 +3,17 @@
     "controlsPresent": true,
     "runCompleted": true,
     "metaHasRunId": true,
+    "timelineHasEntries": true,
+    "timelineContainsCompletion": true,
     "logsContainCompletion": true,
     "autoPrefilledTaskId": true,
     "autoPrefilledLinearIssue": true
   },
   "status": {
     "agentStatus": "Agent status: completed",
-    "meta": "Run metadata: eng-101 (dc71511a-b467-4adf-9d54-bb02c671998d) | state=completed | linear=ENG-101 | watch=true@30s | artifacts=/Users/jaimin/Documents/Vault/Hacks/Monitor-hack-39-automated-repo-intake-and-planning/.orchestrator/runs/20260228-161650-eng-101 | pr=none",
-    "logSample": "[16:16:50] stdout: $ codex --version\\n[16:16:50] stdout: $ gh --version\\n[16:16:50] stdout: $ git rev-parse --abbrev-ref HEAD\\n[16:16:50] stdout: $ git status --porcelain\\n[16:16:50] stdout: $ git remote get-url origin\\n[16:16:50] stdout: Complexity routing: source=ticket_brief_dry_run score=1 level=low total_subagent_budget=0\\n[16:16:50] stdout: Phase sub-agent budgets: plan=0, implementation=0, test=0\\n[16:16:50] stdout: == PLAN AGENT ==\\n[16:16:50] stdout: model=gpt-5.3-codex effort=low subagent_budget=0\\n[16:16:50] stdout: == IMPLEMENTATION AGENT ==\\n[16:16:50] stdout: model=gpt-5.3-codex "
+    "meta": "Run metadata: eng-101 (ffa7b80c-abc9-4398-b652-950151c87098) | state=completed | linear=ENG-101 | watch=true@30s | artifacts=/Users/jaimin/Documents/Vault/Hacks/Monitor-hack-39-automated-repo-intake-and-planning/.orchestrator/runs/20260228-162710-eng-101 | pr=none",
+    "timelineSample": "16:27:10\n          Tracking run eng-101\n        \n      \n        \n          16:27:10\n          Run running\n        \n      \n        \n          16:27:10\n          Complexity routing: source=ticket_brief_dry_run score=1 level=low total_subagent_budget=0\n        \n      \n        \n          16:27:10\n          Phase sub-agent budgets: plan=0, implementation=0, test=0\n        \n      \n        \n          16:27:10\n          Plan phase started\n        \n      \n        \n          16:27:10\n          Implementation phase started\n        \n      \n        \n          16:27:10\n          Test phase started\n        \n",
+    "logSample": "[16:27:10] stdout: $ codex --version\\n[16:27:10] stdout: $ gh --version\\n[16:27:10] stdout: $ git rev-parse --abbrev-ref HEAD\\n[16:27:10] stdout: $ git status --porcelain\\n[16:27:10] stdout: $ git remote get-url origin\\n[16:27:10] stdout: Complexity routing: source=ticket_brief_dry_run score=1 level=low total_subagent_budget=0\\n[16:27:10] stdout: Phase sub-agent budgets: plan=0, implementation=0, test=0\\n[16:27:10] stdout: == PLAN AGENT ==\\n[16:27:10] stdout: model=gpt-5.3-codex effort=low subagent_budget=0\\n[16:27:10] stdout: == IMPLEMENTATION AGENT ==\\n[16:27:10] stdout: model=gpt-5.3-codex "
   },
   "artifacts": {
     "screenshot": "/Users/jaimin/Documents/Vault/Hacks/Monitor-hack-39-automated-repo-intake-and-planning/electron-agents-orchestrator-verification.png"

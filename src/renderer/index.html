@@ -157,8 +157,64 @@
               </section>
 
               <section class="agents-log-panel">
-                <h4>Run Logs</h4>
-                <pre id="agent-logs" class="logs">No orchestrator output yet.</pre>
+                <h4>Run Timeline</h4>
+                <ol id="agent-timeline" class="agent-timeline">
+                  <li class="agent-timeline-item is-placeholder">
+                    <span class="agent-timeline-label">No timeline events yet.</span>
+                  </li>
+                </ol>
+                <details class="agent-logs-disclosure">
+                  <summary>Raw Logs</summary>
+                  <pre id="agent-logs" class="logs">No orchestrator output yet.</pre>
+                </details>
+              </section>
+
+              <section class="agents-managed-panel">
+                <header class="agents-managed-header">
+                  <h4>Managed Local Servers</h4>
+                  <p>Create server entries, then start, stop, or remove them from this app.</p>
+                </header>
+
+                <div class="managed-server-layout">
+                  <section class="managed-server-form-panel">
+                    <input id="managed-server-id" type="hidden" />
+
+                    <label for="managed-server-name">Name</label>
+                    <input id="managed-server-name" type="text" placeholder="Codex App Server" />
+
+                    <label for="managed-server-command">Command</label>
+                    <input id="managed-server-command" type="text" placeholder="codex" />
+
+                    <label for="managed-server-args">Arguments</label>
+                    <input
+                      id="managed-server-args"
+                      type="text"
+                      placeholder="app-server --port 3333"
+                    />
+
+                    <label for="managed-server-cwd">Working Directory (optional)</label>
+                    <input id="managed-server-cwd" type="text" placeholder="/absolute/path" />
+
+                    <div class="row">
+                      <button id="managed-server-save" type="button">Save Server</button>
+                      <button id="managed-server-clear" type="button">Clear Form</button>
+                    </div>
+
+                    <p id="managed-server-status" class="settings-status">Managed servers: idle</p>
+                  </section>
+
+                  <section class="managed-server-list-panel">
+                    <h5>Saved Servers</h5>
+                    <div id="managed-server-list" class="managed-server-list">
+                      No managed servers yet.
+                    </div>
+                  </section>
+                </div>
+
+                <section class="managed-server-logs-panel">
+                  <h5>Selected Server Logs</h5>
+                  <pre id="managed-server-logs" class="logs">Select a server to view logs.</pre>
+                </section>
               </section>
             </div>
           </div>

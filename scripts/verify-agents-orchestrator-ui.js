@@ -74,15 +74,19 @@ async function run() {
 
     const statusText = ((await page.locator("#agent-status").textContent()) || "").trim();
     const metaText = ((await page.locator("#agent-run-meta").textContent()) || "").trim();
+    const timelineText = ((await page.locator("#agent-timeline").textContent()) || "").trim();
     const logsText = ((await page.locator("#agent-logs").textContent()) || "").trim();
 
     results.status.agentStatus = statusText;
     results.status.meta = metaText;
+    results.status.timelineSample = timelineText.slice(0, 600);
     results.status.logSample = logsText.slice(0, 600);
 
     const statusLower = statusText.toLowerCase();
     results.checks.runCompleted = statusLower.includes("completed");
     results.checks.metaHasRunId = /\([0-9a-f-]{36}\)/i.test(metaText);
+    results.checks.timelineHasEntries = (await page.locator("#agent-timeline .agent-timeline-item").count()) >= 3;
+    results.checks.timelineContainsCompletion = timelineText.toLowerCase().includes("run completed");
     results.checks.logsContainCompletion = logsText.toLowerCase().includes("orchestration completed");
     results.checks.autoPrefilledTaskId = ((await page.inputValue("#agent-task-id")) || "")
       .trim()

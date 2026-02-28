@@ -9,6 +9,24 @@ contextBridge.exposeInMainWorld("monitor", {
     get: () => ipcRenderer.invoke("theme-settings:get"),
     save: (settings) => ipcRenderer.invoke("theme-settings:save", settings)
   },
+  managedServers: {
+    list: () => ipcRenderer.invoke("managed-servers:list"),
+    create: (payload) => ipcRenderer.invoke("managed-servers:create", payload),
+    update: (payload) => ipcRenderer.invoke("managed-servers:update", payload),
+    start: (serverId) => ipcRenderer.invoke("managed-servers:start", { serverId }),
+    stop: (serverId) => ipcRenderer.invoke("managed-servers:stop", { serverId }),
+    remove: (serverId) => ipcRenderer.invoke("managed-servers:remove", { serverId }),
+    subscribe: (listener) => {
+      if (typeof listener !== "function") {
+        return () => {};
+      }
+      const handler = (_event, payload) => listener(payload);
+      ipcRenderer.on("managed-servers:event", handler);
+      return () => {
+        ipcRenderer.removeListener("managed-servers:event", handler);
+      };
+    }
+  },
   orchestrator: {
     start: (payload) => ipcRenderer.invoke("orchestrator:start", payload),
     stop: (runId) => ipcRenderer.invoke("orchestrator:stop", { runId }),

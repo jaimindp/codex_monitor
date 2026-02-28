@@ -7,9 +7,14 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const LINEAR_ENV_KEYS = ["LINEAR_API_KEY", "LINEAR_TEAM_KEY"];
 const ALLOWED_THEMES = new Set(["dark", "light"]);
 const ORCHESTRATOR_LOG_LIMIT = 1200;
+const MANAGED_SERVER_LOG_LIMIT = 600;
 const RUN_ACTIVE_STATES = new Set(["starting", "running", "stopping"]);
+const MANAGED_SERVER_ACTIVE_STATES = new Set(["starting", "running", "stopping"]);
 
 const orchestratorRuns = new Map();
+const managedServers = new Map();
+const managedServerRuntime = new Map();
+let managedServersReadyPromise = null;
 
 function getEnvFilePath() {
   return path.join(app.getAppPath(), ".env");
@@ -17,6 +22,10 @@ function getEnvFilePath() {
 
 function getThemeSettingsPath() {
   return path.join(app.getPath("userData"), "theme-settings.json");
+}
+
+function getManagedServersPath() {
+  return path.join(app.getPath("userData"), "managed-servers.json");
 }
 
 function parseEnvLine(line) {
@@ -139,6 +148,489 @@ async function saveThemeSettings(theme) {
   const payload = `${JSON.stringify({ theme: normalizedTheme }, null, 2)}\n`;
   await fs.writeFile(themeSettingsPath, payload, "utf8");
   return { theme: normalizedTheme };
+}
+
+function parseArgsText(value) {
+  const source = String(value || "").trim();
+  if (!source) {
+    return [];
+  }
+
+  const tokens = [];
+  let current = "";
+  let quote = null;
+  let isEscaped = false;
+
+  for (const char of source) {
+    if (isEscaped) {
+      current += char;
+      isEscaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      isEscaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (isEscaped) {
+    current += "\\";
+  }
+  if (quote) {
+    throw new Error("Arguments contain an unclosed quote.");
+  }
+  if (current) {
+    tokens.push(current);
+  }
+  return tokens;
+}
+
+function normalizeManagedServer(raw) {
+  const id = String(raw?.id || "").trim();
+  if (!id) {
+    return null;
+  }
+
+  const name = String(raw?.name || "").trim();
+  const command = String(raw?.command || "").trim();
+  const args = Array.isArray(raw?.args)
+    ? raw.args.map((value) => String(value)).filter((value) => value.length > 0)
+    : [];
+  const argsText = String(raw?.argsText || args.join(" ")).trim();
+  const cwd = String(raw?.cwd || "").trim();
+  const status = String(raw?.status || "stopped").trim().toLowerCase();
+
+  return {
+    id,
+    name: name || id,
+    command,
+    args,
+    argsText,
+    cwd,
+    status: MANAGED_SERVER_ACTIVE_STATES.has(status) ? "stopped" : status || "stopped",
+    lastRunAt: raw?.lastRunAt ? String(raw.lastRunAt) : null,
+    pid: null,
+    error: raw?.error ? String(raw.error) : null
+  };
+}
+
+async function ensureManagedServersLoaded() {
+  if (managedServersReadyPromise) {
+    return managedServersReadyPromise;
+  }
+
+  managedServersReadyPromise = (async () => {
+    let source = "";
+    try {
+      source = await fs.readFile(getManagedServersPath(), "utf8");
+    } catch (error) {
+      if (!error || error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+
+    let parsed = [];
+    if (source.trim()) {
+      try {
+        const data = JSON.parse(source);
+        if (Array.isArray(data)) {
+          parsed = data;
+        }
+      } catch (error) {
+        console.warn("Could not parse managed-servers.json:", error);
+      }
+    }
+
+    managedServers.clear();
+    parsed.forEach((item) => {
+      const server = normalizeManagedServer(item);
+      if (server) {
+        managedServers.set(server.id, server);
+      }
+    });
+
+    await persistManagedServers();
+  })();
+
+  return managedServersReadyPromise;
+}
+
+async function persistManagedServers() {
+  const payload = Array.from(managedServers.values()).map((server) => ({
+    id: server.id,
+    name: server.name,
+    command: server.command,
+    args: server.args,
+    argsText: server.argsText,
+    cwd: server.cwd,
+    status: server.status,
+    lastRunAt: server.lastRunAt,
+    pid: server.pid,
+    error: server.error
+  }));
+  await fs.writeFile(getManagedServersPath(), `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+}
+
+function isManagedServerActive(server) {
+  return Boolean(server && MANAGED_SERVER_ACTIVE_STATES.has(server.status));
+}
+
+function createManagedServerSnapshot(server, options = {}) {
+  if (!server) {
+    return null;
+  }
+  const includeLogs = options.includeLogs !== false;
+  const runtime = managedServerRuntime.get(server.id);
+  return {
+    id: server.id,
+    name: server.name,
+    command: server.command,
+    args: [...server.args],
+    argsText: server.argsText,
+    cwd: server.cwd,
+    status: server.status,
+    lastRunAt: server.lastRunAt,
+    pid: Number.isInteger(server.pid) ? server.pid : null,
+    error: server.error || null,
+    logs: includeLogs && runtime?.logs ? [...runtime.logs] : []
+  };
+}
+
+function emitManagedServerEvent(payload) {
+  BrowserWindow.getAllWindows().forEach((window) => {
+    if (window && !window.isDestroyed()) {
+      window.webContents.send("managed-servers:event", payload);
+    }
+  });
+}
+
+function emitManagedServerState(serverId) {
+  const server = managedServers.get(serverId);
+  emitManagedServerEvent({
+    type: "state",
+    server: createManagedServerSnapshot(server)
+  });
+}
+
+function setManagedServerState(server, state, details = {}) {
+  if (!server) {
+    return;
+  }
+  server.status = state;
+  server.pid = Number.isInteger(details.pid) ? details.pid : null;
+  server.error = details.error || null;
+  if (details.lastRunAt) {
+    server.lastRunAt = details.lastRunAt;
+  }
+  void persistManagedServers().catch((error) => {
+    console.warn("Could not persist managed servers:", error);
+  });
+  emitManagedServerState(server.id);
+}
+
+function appendManagedServerLog(serverId, stream, chunk) {
+  const runtime = managedServerRuntime.get(serverId);
+  if (!runtime) {
+    return;
+  }
+  const text = String(chunk || "");
+  if (!text) {
+    return;
+  }
+  const lines = text.split(/\r?\n/).filter((line) => line.length > 0);
+  const timestamp = new Date().toISOString();
+  lines.forEach((line) => {
+    const entry = { ts: timestamp, stream, text: line };
+    runtime.logs.push(entry);
+    emitManagedServerEvent({
+      type: "log",
+      serverId,
+      stream,
+      ts: timestamp,
+      text: line
+    });
+  });
+  if (runtime.logs.length > MANAGED_SERVER_LOG_LIMIT) {
+    runtime.logs.splice(0, runtime.logs.length - MANAGED_SERVER_LOG_LIMIT);
+  }
+}
+
+function signalManagedServer(runtime, signal) {
+  const child = runtime?.child;
+  if (!child || typeof child.pid !== "number") {
+    return false;
+  }
+
+  if (process.platform !== "win32") {
+    try {
+      process.kill(-child.pid, signal);
+      return true;
+    } catch (_error) {
+      // Fall through to direct child signaling below.
+    }
+  }
+
+  try {
+    child.kill(signal);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+function validateManagedServerPayload(payload, requireId = false) {
+  const id = String(payload?.id || "").trim();
+  const name = String(payload?.name || "").trim();
+  const command = String(payload?.command || "").trim();
+  const cwd = String(payload?.cwd || "").trim();
+  const argsText = String(payload?.argsText || "").trim();
+  const args = parseArgsText(argsText);
+
+  if (requireId && !id) {
+    throw new Error("Server ID is required.");
+  }
+  if (!name) {
+    throw new Error("Server name is required.");
+  }
+  if (!command) {
+    throw new Error("Server command is required.");
+  }
+
+  return {
+    id: id || randomUUID(),
+    name,
+    command,
+    args,
+    argsText,
+    cwd
+  };
+}
+
+function buildManagedServerResponse(serverId = null) {
+  return {
+    server: serverId ? createManagedServerSnapshot(managedServers.get(serverId)) : null,
+    servers: Array.from(managedServers.values())
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((server) => createManagedServerSnapshot(server, { includeLogs: false }))
+  };
+}
+
+async function listManagedServers() {
+  await ensureManagedServersLoaded();
+  return buildManagedServerResponse();
+}
+
+async function createManagedServer(payload) {
+  await ensureManagedServersLoaded();
+  const data = validateManagedServerPayload(payload, false);
+  if (managedServers.has(data.id)) {
+    throw new Error("A server with this ID already exists.");
+  }
+  const server = {
+    id: data.id,
+    name: data.name,
+    command: data.command,
+    args: data.args,
+    argsText: data.argsText,
+    cwd: data.cwd,
+    status: "stopped",
+    lastRunAt: null,
+    pid: null,
+    error: null
+  };
+  managedServers.set(server.id, server);
+  await persistManagedServers();
+  emitManagedServerState(server.id);
+  return buildManagedServerResponse(server.id);
+}
+
+async function updateManagedServer(payload) {
+  await ensureManagedServersLoaded();
+  const data = validateManagedServerPayload(payload, true);
+  const existing = managedServers.get(data.id);
+  if (!existing) {
+    throw new Error("Managed server not found.");
+  }
+  if (isManagedServerActive(existing)) {
+    throw new Error("Stop the server before updating command settings.");
+  }
+
+  existing.name = data.name;
+  existing.command = data.command;
+  existing.args = data.args;
+  existing.argsText = data.argsText;
+  existing.cwd = data.cwd;
+  existing.error = null;
+  await persistManagedServers();
+  emitManagedServerState(existing.id);
+  return buildManagedServerResponse(existing.id);
+}
+
+async function startManagedServer(serverId) {
+  await ensureManagedServersLoaded();
+  const id = String(serverId || "").trim();
+  if (!id) {
+    throw new Error("Server ID is required.");
+  }
+  const server = managedServers.get(id);
+  if (!server) {
+    throw new Error("Managed server not found.");
+  }
+  if (isManagedServerActive(server)) {
+    return buildManagedServerResponse(id);
+  }
+
+  const child = spawn(server.command, server.args, {
+    cwd: server.cwd || app.getAppPath(),
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32"
+  });
+
+  const runtime = {
+    child,
+    logs: [],
+    stopRequested: false,
+    forceKillTimer: null,
+    closed: false,
+    closePromise: null,
+    closeResolve: null
+  };
+  runtime.closePromise = new Promise((resolve) => {
+    runtime.closeResolve = resolve;
+  });
+  managedServerRuntime.set(id, runtime);
+
+  const now = new Date().toISOString();
+  setManagedServerState(server, "starting", {
+    pid: child.pid,
+    lastRunAt: now,
+    error: null
+  });
+
+  child.on("spawn", () => {
+    setManagedServerState(server, "running", {
+      pid: child.pid,
+      lastRunAt: now,
+      error: null
+    });
+  });
+
+  if (child.stdout) {
+    child.stdout.on("data", (chunk) => appendManagedServerLog(id, "stdout", chunk));
+  }
+  if (child.stderr) {
+    child.stderr.on("data", (chunk) => appendManagedServerLog(id, "stderr", chunk));
+  }
+
+  child.on("error", (error) => {
+    setManagedServerState(server, runtime.stopRequested ? "stopped" : "failed", {
+      pid: null,
+      error: error?.message || String(error)
+    });
+  });
+
+  child.on("close", (code) => {
+    if (runtime.forceKillTimer) {
+      clearTimeout(runtime.forceKillTimer);
+      runtime.forceKillTimer = null;
+    }
+    runtime.closed = true;
+    managedServerRuntime.delete(id);
+    const failed = Number.isInteger(code) && code !== 0 && !runtime.stopRequested;
+    setManagedServerState(server, failed ? "failed" : "stopped", {
+      pid: null,
+      error: failed ? `Server exited with code ${code}` : null
+    });
+    if (runtime.closeResolve) {
+      runtime.closeResolve();
+    }
+  });
+
+  return buildManagedServerResponse(id);
+}
+
+async function stopManagedServer(serverId) {
+  await ensureManagedServersLoaded();
+  const id = String(serverId || "").trim();
+  if (!id) {
+    throw new Error("Server ID is required.");
+  }
+  const server = managedServers.get(id);
+  if (!server) {
+    throw new Error("Managed server not found.");
+  }
+  const runtime = managedServerRuntime.get(id);
+  if (!runtime || runtime.closed) {
+    setManagedServerState(server, "stopped", { pid: null, error: null });
+    return buildManagedServerResponse(id);
+  }
+
+  runtime.stopRequested = true;
+  setManagedServerState(server, "stopping", {
+    pid: runtime.child?.pid,
+    error: null
+  });
+  signalManagedServer(runtime, "SIGTERM");
+
+  if (runtime.forceKillTimer) {
+    clearTimeout(runtime.forceKillTimer);
+  }
+  runtime.forceKillTimer = setTimeout(() => {
+    if (!runtime.closed) {
+      signalManagedServer(runtime, "SIGKILL");
+    }
+  }, 8000);
+  runtime.forceKillTimer.unref();
+
+  return buildManagedServerResponse(id);
+}
+
+async function removeManagedServer(serverId) {
+  await ensureManagedServersLoaded();
+  const id = String(serverId || "").trim();
+  if (!id) {
+    throw new Error("Server ID is required.");
+  }
+  const server = managedServers.get(id);
+  if (!server) {
+    throw new Error("Managed server not found.");
+  }
+
+  const runtime = managedServerRuntime.get(id);
+  if (runtime && !runtime.closed) {
+    await stopManagedServer(id);
+    await Promise.race([
+      runtime.closePromise,
+      new Promise((resolve) => setTimeout(resolve, 9000))
+    ]);
+    managedServerRuntime.delete(id);
+  }
+
+  managedServers.delete(id);
+  await persistManagedServers();
+  emitManagedServerEvent({ type: "removed", serverId: id });
+  return buildManagedServerResponse();
 }
 
 function createWindow() {
@@ -512,6 +1004,14 @@ app.whenReady().then(() => {
   );
   ipcMain.handle("theme-settings:get", () => getThemeSettings());
   ipcMain.handle("theme-settings:save", (_event, settings) => saveThemeSettings(settings?.theme));
+  ipcMain.handle("managed-servers:list", () => listManagedServers());
+  ipcMain.handle("managed-servers:create", (_event, payload) => createManagedServer(payload));
+  ipcMain.handle("managed-servers:update", (_event, payload) => updateManagedServer(payload));
+  ipcMain.handle("managed-servers:start", (_event, payload) => startManagedServer(payload?.serverId));
+  ipcMain.handle("managed-servers:stop", (_event, payload) => stopManagedServer(payload?.serverId));
+  ipcMain.handle("managed-servers:remove", (_event, payload) =>
+    removeManagedServer(payload?.serverId)
+  );
   ipcMain.handle("orchestrator:start", (_event, payload) => startOrchestratorRun(payload));
   ipcMain.handle("orchestrator:stop", (_event, payload) => stopOrchestratorRun(payload?.runId));
   ipcMain.handle("orchestrator:status", (_event, payload) => getOrchestratorStatus(payload?.runId));
@@ -526,6 +1026,19 @@ app.whenReady().then(() => {
 });
 
 app.on("before-quit", () => {
+  managedServerRuntime.forEach((runtime, serverId) => {
+    const server = managedServers.get(serverId);
+    if (!runtime || !server) {
+      return;
+    }
+    runtime.stopRequested = true;
+    setManagedServerState(server, "stopping", {
+      pid: runtime.child?.pid,
+      error: null
+    });
+    signalManagedServer(runtime, "SIGTERM");
+  });
+
   const activeRun = getActiveRun();
   if (activeRun && activeRun.child) {
     activeRun.stopRequested = true;

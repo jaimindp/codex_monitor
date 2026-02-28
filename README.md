@@ -70,6 +70,17 @@ Runbook and templates:
 - `scripts/orchestrator/templates/*`
 - `scripts/orchestrator/schemas/*`
 
+## Managed Local Servers (Agents screen)
+
+- The `Agents` screen now includes a `Managed Local Servers` section for lifecycle control.
+- You can:
+  - Save a server entry (`name`, `command`, `arguments`, optional `cwd`).
+  - Start/stop a saved server from Electron.
+  - Remove a server; if it is running, the app stops it first before deletion.
+- Server definitions are persisted in Electron `userData` at `managed-servers.json`.
+- Removal is persistent across restart: deleted servers are not reloaded on app launch.
+- Renderer access is IPC-only through `preload.js` (`window.monitor.managedServers`).
+
 ## Codex app-server integration
 
 - Requires the `codex` CLI on your `PATH`.
