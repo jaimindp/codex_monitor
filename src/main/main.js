@@ -278,7 +278,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  monitorDataService = createMonitorDataService();
+  try {
+    monitorDataService = createMonitorDataService();
+  } catch (error) {
+    monitorDataService = null;
+    console.error("Monitor data service startup failed:", error);
+  }
   ipcMain.handle("linear-settings:get", () => getLinearSettings());
   ipcMain.handle("linear-settings:save", (_event, settings) =>
     saveLinearSettings(settings?.apiKey, settings?.teamKey)
@@ -300,6 +305,17 @@ app.whenReady().then(() => {
   );
 
   createWindow();
+
+  // Prime local-first cache after window creation so startup UI is never blocked by ingestion work.
+  if (monitorDataService) {
+    setTimeout(() => {
+      try {
+        monitorDataService.runIngestion();
+      } catch (error) {
+        console.error("Initial monitor ingestion failed:", error);
+      }
+    }, 0);
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

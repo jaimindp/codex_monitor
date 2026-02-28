@@ -151,6 +151,18 @@
               <p id="github-scan-status" class="settings-status">Git scan status: idle</p>
               <p id="github-scan-summary" class="settings-status">No scan results yet.</p>
             </div>
+            <div id="github-scan-overview" class="git-scan-overview">Run a scan to see aggregate stats.</div>
+            <div class="git-scan-toolbar">
+              <label for="github-page-size">Repos per page</label>
+              <select id="github-page-size">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+              </select>
+              <button id="github-prev-page-btn" type="button">Previous</button>
+              <button id="github-next-page-btn" type="button">Next</button>
+              <span id="github-scan-page-status" class="settings-status">Page 0 of 0</span>
+            </div>
             <div id="github-scan-results" class="git-scan-results">
               Run a scan to view local repos and worktrees.
             </div>

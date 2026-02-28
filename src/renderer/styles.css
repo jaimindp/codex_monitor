@@ -398,47 +398,205 @@ input {
 .git-scan-results {
   margin-top: 14px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
+}
+
+.git-scan-overview {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: var(--panel-strong);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.git-overview-stat {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  background: var(--panel);
+  display: grid;
+  gap: 2px;
+}
+
+.git-overview-stat strong {
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.git-overview-label {
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.git-overview-roots {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  word-break: break-word;
+}
+
+.git-scan-toolbar {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.git-scan-toolbar label {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.git-scan-toolbar select {
+  max-width: 100px;
+  margin: 0;
+}
+
+.git-scan-toolbar .settings-status {
+  margin: 0 0 0 auto;
+  font-size: 0.84rem;
 }
 
 .git-repo-card {
-  border: 1px solid #2a3a4f;
+  border: 1px solid #536982;
   border-radius: 12px;
   padding: 12px;
-  background: linear-gradient(180deg, #111a27 0%, #0d1621 100%);
+  background: linear-gradient(180deg, #f6f9fd 0%, #eef4fb 100%);
+  color: #1b2a3f;
 }
 
 :root[data-theme="light"] .git-repo-card {
-  border-color: #cad9ea;
+  border-color: #b4c8df;
   background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
+  color: #162537;
+}
+
+:root[data-theme="dark"] .git-repo-card {
+  border-color: #3e5570;
+  background: linear-gradient(180deg, #111a27 0%, #0d1621 100%);
+  color: #deebf9;
+}
+
+.git-repo-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.git-last-seen {
+  font-size: 0.77rem;
+  border: 1px solid #9fb7d1;
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: #223954;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+:root[data-theme="dark"] .git-last-seen {
+  border-color: #34506f;
+  color: #c7dff8;
+  background: rgba(10, 17, 25, 0.72);
 }
 
 .git-repo-card h4 {
   margin: 0 0 8px;
   word-break: break-word;
+  color: inherit;
 }
 
-.git-repo-origin {
-  margin: 6px 0;
-  color: var(--muted);
-}
-
-.git-worktree-list {
-  margin: 10px 0 0;
-  padding-left: 18px;
+.git-repo-facts {
+  margin-top: 6px;
   display: grid;
   gap: 6px;
 }
 
-.git-worktree-list li {
+.git-repo-origin {
+  margin: 0;
+  color: inherit;
+  display: grid;
+  grid-template-columns: 100px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.git-repo-origin span {
+  font-size: 0.79rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #4f647d;
+}
+
+:root[data-theme="dark"] .git-repo-origin span {
+  color: #98b3cf;
+}
+
+.git-repo-origin code,
+.git-repo-origin strong {
+  min-width: 0;
   word-break: break-word;
 }
 
+.git-worktree-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+}
+
+.git-worktree-row {
+  border: 1px solid #c2d4e8;
+  border-radius: 9px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.75);
+  display: grid;
+  gap: 5px;
+}
+
+:root[data-theme="dark"] .git-worktree-row {
+  border-color: #31485f;
+  background: rgba(10, 17, 25, 0.7);
+}
+
+.git-path {
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
 .git-worktree-meta {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: #4b5f76;
   font-size: 0.82rem;
+}
+
+:root[data-theme="dark"] .git-worktree-meta {
+  color: #9ab4cf;
+}
+
+.git-branch-pill {
+  border: 1px solid #a9c2dd;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 0.75rem;
+  background: rgba(241, 248, 255, 0.92);
+  color: #1f3f61;
+}
+
+:root[data-theme="dark"] .git-branch-pill {
+  border-color: #315273;
+  background: rgba(18, 30, 46, 0.92);
+  color: #c9e0f8;
 }
 
 .graph-controls-panel {
@@ -767,5 +925,15 @@ input {
   .graph-toolbar {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .git-scan-toolbar .settings-status {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .git-repo-origin {
+    grid-template-columns: 1fr;
+    gap: 2px;
   }
 }

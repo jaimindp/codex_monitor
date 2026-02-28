@@ -21,7 +21,10 @@ async function main() {
   });
 
   try {
-    const page = await app.firstWindow();
+    let page = app.windows()[0] || null;
+    if (!page) {
+      page = await app.waitForEvent("window", { timeout: 60000 });
+    }
     await page.waitForLoadState("domcontentloaded");
 
     await page.getByRole("button", { name: "Git + Worktrees" }).click();
