@@ -8,6 +8,11 @@ const graphStatusEl = document.getElementById("graph-status");
 const settingsStatusEl = document.getElementById("settings-status");
 const graphOutputEl = document.getElementById("graph-output");
 const graphDetailsEl = document.getElementById("graph-details");
+const githubRootInput = document.getElementById("github-root-input");
+const githubScanBtn = document.getElementById("github-scan-btn");
+const githubScanStatusEl = document.getElementById("github-scan-status");
+const githubScanSummaryEl = document.getElementById("github-scan-summary");
+const githubScanResultsEl = document.getElementById("github-scan-results");
 const graphZoomInBtn = document.getElementById("graph-zoom-in");
 const graphZoomOutBtn = document.getElementById("graph-zoom-out");
 const graphZoomResetBtn = document.getElementById("graph-zoom-reset");
@@ -31,6 +36,7 @@ const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]")
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
+let isGithubScanInFlight = false;
 let graphZoomLevel = 1;
 let graphDefaultZoomLevel = 1;
 let graphBaseSize = { width: 0, height: 0 };
@@ -44,6 +50,7 @@ let graphPanState = {
 };
 let currentScreenId = "overview";
 let currentTheme = "dark";
+const GITHUB_SCAN_ROOTS_STORAGE_KEY = "monitor.githubScan.roots";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const GRAPH_ZOOM_MIN = 0.2;
@@ -138,6 +145,7 @@ if (linearSaveSettingsBtn && linearApiKeyInput && linearTeamKeyInput) {
 }
 
 loadLinearSettings();
+initializeGitRepoScanPanel();
 
 function initializeThemeControls() {
   if (themeToggleBtn) {
@@ -247,6 +255,18 @@ function setGraphStatus(message) {
 function setSettingsStatus(message) {
   if (settingsStatusEl) {
     settingsStatusEl.textContent = message;
+  }
+}
+
+function setGithubScanStatus(message) {
+  if (githubScanStatusEl) {
+    githubScanStatusEl.textContent = message;
+  }
+}
+
+function setGithubScanSummary(message) {
+  if (githubScanSummaryEl) {
+    githubScanSummaryEl.textContent = message;
   }
 }
 
@@ -388,7 +408,6 @@ function renderHealthSummary(health) {
 function formatInteger(value) {
   return Number(value || 0).toLocaleString();
 }
-
 function updateLastRefresh(sourceName) {
   if (!lastRefreshValueEl) {
     return;
@@ -396,6 +415,167 @@ function updateLastRefresh(sourceName) {
 
   const now = new Date();
   lastRefreshValueEl.textContent = `${now.toLocaleTimeString()} (${sourceName})`;
+}
+
+function initializeGitRepoScanPanel() {
+  if (!githubRootInput || !githubScanBtn) {
+    return;
+  }
+
+  hydrateGithubRootInput();
+
+  if (!window.monitor?.githubRepos) {
+    githubScanBtn.disabled = true;
+    setGithubScanStatus("Git scan status: unavailable (secure IPC is not ready)");
+    return;
+  }
+
+  githubScanBtn.addEventListener("click", runGithubScanFromInput);
+}
+
+async function hydrateGithubRootInput() {
+  if (!githubRootInput) {
+    return;
+  }
+
+  const savedRoots = getStoredGithubScanRoots();
+  if (savedRoots) {
+    githubRootInput.value = savedRoots;
+    return;
+  }
+
+  let defaultRoot = "~/Documents";
+  if (window.monitor?.githubRepos?.getDefaultRoot) {
+    try {
+      const payload = await window.monitor.githubRepos.getDefaultRoot();
+      if (payload && payload.root) {
+        defaultRoot = String(payload.root);
+      }
+    } catch (error) {
+      setGithubScanStatus(`Git scan status: could not load default root (${errorMessage(error)})`);
+    }
+  }
+
+  githubRootInput.value = defaultRoot;
+}
+
+function getStoredGithubScanRoots() {
+  try {
+    return localStorage.getItem(GITHUB_SCAN_ROOTS_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function persistGithubScanRoots(rawValue) {
+  try {
+    localStorage.setItem(GITHUB_SCAN_ROOTS_STORAGE_KEY, rawValue);
+  } catch {
+    // Ignore localStorage write failures.
+  }
+}
+
+function getValidatedGithubScanRootsFromInput() {
+  if (!githubRootInput) {
+    throw new Error("Git scan input is unavailable");
+  }
+
+  const roots = githubRootInput.value
+    .split(/[\n,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (roots.length === 0) {
+    throw new Error("enter at least one scan root path");
+  }
+  if (roots.length > 10) {
+    throw new Error("enter at most 10 scan roots");
+  }
+
+  return roots;
+}
+
+async function runGithubScanFromInput() {
+  if (!githubScanBtn || !window.monitor?.githubRepos || isGithubScanInFlight) {
+    return;
+  }
+
+  let roots = [];
+  try {
+    roots = getValidatedGithubScanRootsFromInput();
+  } catch (error) {
+    setGithubScanStatus(`Git scan status: ${errorMessage(error)}`);
+    return;
+  }
+
+  isGithubScanInFlight = true;
+  githubScanBtn.disabled = true;
+  setGithubScanStatus("Git scan status: scanning local repositories...");
+  setGithubScanSummary("Scan summary: running...");
+
+  try {
+    const report = await window.monitor.githubRepos.scan({ roots });
+    persistGithubScanRoots(roots.join(", "));
+    renderGithubScanResults(report);
+    setGithubScanStatus("Git scan status: completed");
+    updateLastRefresh("Git + Worktrees");
+  } catch (error) {
+    setGithubScanStatus(`Git scan status: ${errorMessage(error)}`);
+    setGithubScanSummary("Scan summary: failed");
+  } finally {
+    isGithubScanInFlight = false;
+    githubScanBtn.disabled = false;
+  }
+}
+
+function renderGithubScanResults(report) {
+  const repos = Array.isArray(report?.repos) ? report.repos : [];
+  const roots = Array.isArray(report?.roots) ? report.roots : [];
+  const candidateCount = Number.isFinite(report?.gitCandidateCount) ? report.gitCandidateCount : 0;
+  const generatedAt = report?.generatedAt ? formatDate(report.generatedAt) : "Unknown";
+
+  setGithubScanSummary(
+    `Scan summary: ${repos.length} GitHub repos | ${candidateCount} git candidates | generated ${generatedAt}`
+  );
+
+  if (!githubScanResultsEl) {
+    return;
+  }
+
+  if (repos.length === 0) {
+    githubScanResultsEl.textContent = `No GitHub repos found for root(s): ${roots.join(", ") || "(none)"}`;
+    return;
+  }
+
+  githubScanResultsEl.innerHTML = repos
+    .map((repo) => {
+      const worktrees = Array.isArray(repo.worktrees) ? repo.worktrees : [];
+      const worktreeItems = worktrees
+        .map((worktree) => {
+          const branchLabel = worktree.branch || (worktree.detached ? "(detached)" : "(unknown)");
+          return `
+            <li>
+              <code>${escapeHtml(String(worktree.path || ""))}</code>
+              <span class="git-worktree-meta">${escapeHtml(branchLabel)} · ${
+            escapeHtml(String(worktree.head || "unknown"))
+          }</span>
+            </li>
+          `;
+        })
+        .join("");
+
+      return `
+        <section class="git-repo-card">
+          <h4>${escapeHtml(String(repo.repoRoot || ""))}</h4>
+          <p class="git-repo-origin">origin: <code>${escapeHtml(String(repo.origin || "(none)"))}</code></p>
+          <p class="git-repo-origin">branch: <strong>${escapeHtml(String(repo.currentBranch || "(detached/unknown)"))}</strong></p>
+          <p class="git-repo-origin">HEAD: <code>${escapeHtml(String(repo.head || "unknown"))}</code></p>
+          <p class="git-repo-origin">worktrees: ${worktrees.length}</p>
+          <ul class="git-worktree-list">${worktreeItems || "<li>No worktrees listed.</li>"}</ul>
+        </section>
+      `;
+    })
+    .join("");
 }
 
 async function loadLinearSettings() {

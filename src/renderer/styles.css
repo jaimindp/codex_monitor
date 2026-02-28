@@ -389,6 +389,58 @@ input {
   color: #4b5c74;
 }
 
+.input-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.git-scan-results {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.git-repo-card {
+  border: 1px solid #2a3a4f;
+  border-radius: 12px;
+  padding: 12px;
+  background: linear-gradient(180deg, #111a27 0%, #0d1621 100%);
+}
+
+:root[data-theme="light"] .git-repo-card {
+  border-color: #cad9ea;
+  background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%);
+}
+
+.git-repo-card h4 {
+  margin: 0 0 8px;
+  word-break: break-word;
+}
+
+.git-repo-origin {
+  margin: 6px 0;
+  color: var(--muted);
+}
+
+.git-worktree-list {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.git-worktree-list li {
+  word-break: break-word;
+}
+
+.git-worktree-meta {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .graph-controls-panel {
   margin-top: 12px;
   border: 1px solid #30455f;

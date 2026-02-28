@@ -1,10 +1,15 @@
 const path = require("path");
+const os = require("os");
+const fsSync = require("fs");
 const fs = require("fs/promises");
+const { spawn } = require("child_process");
 const { app, BrowserWindow, ipcMain } = require("electron");
 const { createMonitorDataService } = require("./monitor-data");
 
 const LINEAR_ENV_KEYS = ["LINEAR_API_KEY", "LINEAR_TEAM_KEY"];
 const ALLOWED_THEMES = new Set(["dark", "light"]);
+const GITHUB_REPO_SCAN_TIMEOUT_MS = 120000;
+const NODE_BIN = process.env.NODE_BIN || "node";
 let monitorDataService = null;
 
 function getEnvFilePath() {
@@ -13,6 +18,125 @@ function getEnvFilePath() {
 
 function getThemeSettingsPath() {
   return path.join(app.getPath("userData"), "theme-settings.json");
+}
+
+function getGithubDiscoveryDefaultRoot() {
+  return path.join(os.homedir(), "Documents");
+}
+
+function normalizeDiscoveryRoot(rawRoot) {
+  const input = String(rawRoot || "").trim();
+  if (!input) {
+    return "";
+  }
+
+  if (input === "~") {
+    return os.homedir();
+  }
+
+  if (input.startsWith("~/")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+
+  return path.resolve(input);
+}
+
+function getValidatedDiscoveryRoots(payload) {
+  const rawRoots = Array.isArray(payload?.roots) ? payload.roots : [];
+  const normalized = [];
+  const seen = new Set();
+
+  rawRoots.forEach((rawRoot) => {
+    const rootPath = normalizeDiscoveryRoot(rawRoot);
+    if (!rootPath || seen.has(rootPath)) {
+      return;
+    }
+    seen.add(rootPath);
+    normalized.push(rootPath);
+  });
+
+  if (normalized.length === 0) {
+    return [getGithubDiscoveryDefaultRoot()];
+  }
+
+  if (normalized.length > 10) {
+    throw new Error("Use at most 10 scan roots per request.");
+  }
+
+  normalized.forEach((rootPath) => {
+    try {
+      const stats = fsSync.statSync(rootPath);
+      if (!stats.isDirectory()) {
+        throw new Error();
+      }
+    } catch {
+      throw new Error(`Scan root does not exist or is not a directory: ${rootPath}`);
+    }
+  });
+
+  return normalized;
+}
+
+function runNodeScript(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd || app.getAppPath(),
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+
+    let stdout = "";
+    let stderr = "";
+    let didTimeout = false;
+
+    const timeout = setTimeout(() => {
+      didTimeout = true;
+      child.kill("SIGTERM");
+      setTimeout(() => child.kill("SIGKILL"), 2000);
+    }, options.timeoutMs || GITHUB_REPO_SCAN_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timeout);
+      if (didTimeout) {
+        reject(new Error("GitHub repo discovery timed out."));
+        return;
+      }
+      if (code !== 0) {
+        const message = String(stderr || stdout || "unknown error").trim();
+        reject(new Error(`GitHub repo discovery failed: ${message}`));
+        return;
+      }
+      resolve(String(stdout || "").trim());
+    });
+  });
+}
+
+async function runGithubRepoDiscovery(roots) {
+  const scriptPath = path.join(app.getAppPath(), "scripts", "local-github-repo-worktree-report.js");
+  const args = [scriptPath, "--format", "json"];
+  roots.forEach((rootPath) => {
+    args.push("--root", rootPath);
+  });
+
+  const rawOutput = await runNodeScript(NODE_BIN, args, {
+    timeoutMs: GITHUB_REPO_SCAN_TIMEOUT_MS
+  });
+
+  try {
+    const parsed = JSON.parse(rawOutput);
+    return parsed;
+  } catch {
+    throw new Error("GitHub repo discovery returned invalid JSON.");
+  }
 }
 
 function parseEnvLine(line) {
@@ -163,6 +287,13 @@ app.whenReady().then(() => {
   );
   ipcMain.handle("theme-settings:get", () => getThemeSettings());
   ipcMain.handle("theme-settings:save", (_event, settings) => saveThemeSettings(settings?.theme));
+  ipcMain.handle("github-repos:get-default-root", () => ({
+    root: getGithubDiscoveryDefaultRoot()
+  }));
+  ipcMain.handle("github-repos:scan", async (_event, payload) => {
+    const roots = getValidatedDiscoveryRoots(payload);
+    return runGithubRepoDiscovery(roots);
+  });
   ipcMain.handle("monitor-data:get-dashboard", () =>
     monitorDataService ? monitorDataService.getDashboard() : null
   );
