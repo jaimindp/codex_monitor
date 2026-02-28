@@ -12,6 +12,11 @@ const githubRootInput = document.getElementById("github-root-input");
 const githubScanBtn = document.getElementById("github-scan-btn");
 const githubScanStatusEl = document.getElementById("github-scan-status");
 const githubScanSummaryEl = document.getElementById("github-scan-summary");
+const githubScanOverviewEl = document.getElementById("github-scan-overview");
+const githubPageSizeSelect = document.getElementById("github-page-size");
+const githubPrevPageBtn = document.getElementById("github-prev-page-btn");
+const githubNextPageBtn = document.getElementById("github-next-page-btn");
+const githubScanPageStatusEl = document.getElementById("github-scan-page-status");
 const githubScanResultsEl = document.getElementById("github-scan-results");
 const graphZoomInBtn = document.getElementById("graph-zoom-in");
 const graphZoomOutBtn = document.getElementById("graph-zoom-out");
@@ -20,6 +25,7 @@ const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
+const monitorRefreshDashboardBtn = document.getElementById("monitor-refresh-dashboard");
 const monitorRunIngestionBtn = document.getElementById("monitor-run-ingestion");
 const monitorIngestStatusEl = document.getElementById("monitor-ingest-status");
 const metricTotalEventsEl = document.getElementById("metric-total-events");
@@ -60,6 +66,10 @@ let currentScreenId = "overview";
 let currentTheme = "dark";
 const GITHUB_SCAN_ROOTS_STORAGE_KEY = "monitor.githubScan.roots";
 let isMcpSnapshotInFlight = false;
+const DEFAULT_GITHUB_SCAN_PAGE_SIZE = 25;
+let githubScanRepos = [];
+let githubScanPage = 1;
+let githubScanPageSize = DEFAULT_GITHUB_SCAN_PAGE_SIZE;
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const MCP_MIN_DAYS = 1;
@@ -317,8 +327,25 @@ async function initializeMonitorData() {
   if (monitorRunIngestionBtn) {
     monitorRunIngestionBtn.addEventListener("click", runManualIngestion);
   }
+  if (monitorRefreshDashboardBtn) {
+    monitorRefreshDashboardBtn.addEventListener("click", refreshDashboardView);
+  }
 
   await refreshDashboardFromDb();
+}
+
+async function refreshDashboardView() {
+  if (monitorRefreshDashboardBtn) {
+    monitorRefreshDashboardBtn.disabled = true;
+  }
+  try {
+    await refreshDashboardFromDb();
+    updateLastRefresh("Overview (cached)");
+  } finally {
+    if (monitorRefreshDashboardBtn) {
+      monitorRefreshDashboardBtn.disabled = false;
+    }
+  }
 }
 
 async function runManualIngestion() {
@@ -430,6 +457,7 @@ function renderHealthSummary(health) {
     : "never";
 
   healthSummaryEl.innerHTML = `
+    <div class="health-row"><span>Shared DB</span><strong>${escapeHtml(health.dbPath || "n/a")}</strong></div>
     <div class="health-row"><span>Codex home</span><strong>${escapeHtml(health.codexHome || "n/a")}</strong></div>
     <div class="health-row"><span>History file</span><strong>${health.historyPresent ? "present" : "missing"}</strong></div>
     <div class="health-row"><span>Last ingest source</span><strong>${escapeHtml(health.lastIngestSource || "n/a")}</strong></div>
@@ -463,6 +491,31 @@ function initializeGitRepoScanPanel() {
   }
 
   githubScanBtn.addEventListener("click", runGithubScanFromInput);
+
+  if (githubPageSizeSelect) {
+    githubPageSizeSelect.value = String(DEFAULT_GITHUB_SCAN_PAGE_SIZE);
+    githubPageSizeSelect.addEventListener("change", () => {
+      githubScanPageSize = parsePositiveNumber(githubPageSizeSelect.value, DEFAULT_GITHUB_SCAN_PAGE_SIZE);
+      githubScanPage = 1;
+      renderGithubScanPage();
+    });
+  }
+
+  if (githubPrevPageBtn) {
+    githubPrevPageBtn.addEventListener("click", () => {
+      githubScanPage = Math.max(1, githubScanPage - 1);
+      renderGithubScanPage();
+    });
+  }
+
+  if (githubNextPageBtn) {
+    githubNextPageBtn.addEventListener("click", () => {
+      githubScanPage += 1;
+      renderGithubScanPage();
+    });
+  }
+
+  updateGithubPaginationControls(0, 0, 0);
 }
 
 async function hydrateGithubRootInput() {
@@ -566,31 +619,105 @@ function renderGithubScanResults(report) {
   const candidateCount = Number.isFinite(report?.gitCandidateCount) ? report.gitCandidateCount : 0;
   const generatedAt = report?.generatedAt ? formatDate(report.generatedAt) : "Unknown";
 
+  githubScanRepos = repos
+    .map((repo, index) => normalizeGithubRepo(repo, index))
+    .sort((left, right) => {
+      if (right.lastCommitUnix !== left.lastCommitUnix) {
+        return right.lastCommitUnix - left.lastCommitUnix;
+      }
+      return left.repoRoot.localeCompare(right.repoRoot);
+    });
+  githubScanPage = 1;
+
   setGithubScanSummary(
-    `Scan summary: ${repos.length} GitHub repos | ${candidateCount} git candidates | generated ${generatedAt}`
+    `Scan summary: ${githubScanRepos.length} GitHub repos | ${candidateCount} git candidates | generated ${generatedAt}`
   );
 
+  renderGithubScanOverview({
+    roots,
+    candidateCount,
+    generatedAt,
+    repos: githubScanRepos
+  });
+  renderGithubScanPage();
+}
+
+function renderGithubScanOverview({ roots, candidateCount, generatedAt, repos }) {
+  if (!githubScanOverviewEl) {
+    return;
+  }
+
+  const rootCount = roots.length;
+  const worktreeCount = repos.reduce((sum, repo) => sum + repo.worktrees.length, 0);
+  const detachedCount = repos.reduce(
+    (sum, repo) => sum + repo.worktrees.filter((worktree) => worktree.detached).length,
+    0
+  );
+  const withRecentCommit = repos.filter((repo) => repo.lastCommitUnix > 0).length;
+
+  githubScanOverviewEl.innerHTML = `
+    <div class="git-overview-stat">
+      <span class="git-overview-label">Scan Roots</span>
+      <strong>${formatCount(rootCount)}</strong>
+    </div>
+    <div class="git-overview-stat">
+      <span class="git-overview-label">GitHub Repos</span>
+      <strong>${formatCount(repos.length)}</strong>
+    </div>
+    <div class="git-overview-stat">
+      <span class="git-overview-label">Worktrees</span>
+      <strong>${formatCount(worktreeCount)}</strong>
+    </div>
+    <div class="git-overview-stat">
+      <span class="git-overview-label">Detached</span>
+      <strong>${formatCount(detachedCount)}</strong>
+    </div>
+    <div class="git-overview-stat">
+      <span class="git-overview-label">Recent Commit Known</span>
+      <strong>${formatCount(withRecentCommit)}</strong>
+    </div>
+    <div class="git-overview-stat">
+      <span class="git-overview-label">Git Candidates</span>
+      <strong>${formatCount(candidateCount)}</strong>
+    </div>
+    <p class="git-overview-roots">
+      Roots: ${escapeHtml(roots.join(", ") || "(none)")} | Generated: ${escapeHtml(generatedAt)}
+    </p>
+  `;
+}
+
+function renderGithubScanPage() {
   if (!githubScanResultsEl) {
     return;
   }
 
-  if (repos.length === 0) {
-    githubScanResultsEl.textContent = `No GitHub repos found for root(s): ${roots.join(", ") || "(none)"}`;
+  if (githubScanRepos.length === 0) {
+    githubScanResultsEl.textContent = "No GitHub repos found for the provided roots.";
+    updateGithubPaginationControls(0, 0, 0);
     return;
   }
 
-  githubScanResultsEl.innerHTML = repos
+  const pageSize = Math.max(1, githubScanPageSize);
+  const totalPages = Math.max(1, Math.ceil(githubScanRepos.length / pageSize));
+  githubScanPage = Math.min(totalPages, Math.max(1, githubScanPage));
+  const startIndex = (githubScanPage - 1) * pageSize;
+  const endIndex = Math.min(githubScanRepos.length, startIndex + pageSize);
+  const pageRepos = githubScanRepos.slice(startIndex, endIndex);
+  updateGithubPaginationControls(totalPages, startIndex + 1, endIndex);
+
+  githubScanResultsEl.innerHTML = pageRepos
     .map((repo) => {
-      const worktrees = Array.isArray(repo.worktrees) ? repo.worktrees : [];
+      const worktrees = repo.worktrees;
       const worktreeItems = worktrees
         .map((worktree) => {
           const branchLabel = worktree.branch || (worktree.detached ? "(detached)" : "(unknown)");
           return `
-            <li>
-              <code>${escapeHtml(String(worktree.path || ""))}</code>
-              <span class="git-worktree-meta">${escapeHtml(branchLabel)} · ${
-            escapeHtml(String(worktree.head || "unknown"))
-          }</span>
+            <li class="git-worktree-row">
+              <code class="git-path">${escapeHtml(String(worktree.path || ""))}</code>
+              <span class="git-worktree-meta">
+                <span class="git-branch-pill">${escapeHtml(branchLabel)}</span>
+                <span>HEAD ${escapeHtml(shortSha(String(worktree.head || "unknown")))}</span>
+              </span>
             </li>
           `;
         })
@@ -598,11 +725,25 @@ function renderGithubScanResults(report) {
 
       return `
         <section class="git-repo-card">
-          <h4>${escapeHtml(String(repo.repoRoot || ""))}</h4>
-          <p class="git-repo-origin">origin: <code>${escapeHtml(String(repo.origin || "(none)"))}</code></p>
-          <p class="git-repo-origin">branch: <strong>${escapeHtml(String(repo.currentBranch || "(detached/unknown)"))}</strong></p>
-          <p class="git-repo-origin">HEAD: <code>${escapeHtml(String(repo.head || "unknown"))}</code></p>
-          <p class="git-repo-origin">worktrees: ${worktrees.length}</p>
+          <div class="git-repo-card-head">
+            <h4>${escapeHtml(String(repo.repoRoot || ""))}</h4>
+            <span class="git-last-seen">${escapeHtml(formatRepoRecency(repo.lastCommitUnix))}</span>
+          </div>
+          <div class="git-repo-facts">
+            <p class="git-repo-origin"><span>origin</span><code>${escapeHtml(
+              String(repo.origin || "(none)")
+            )}</code></p>
+            <p class="git-repo-origin"><span>branch</span><strong>${escapeHtml(
+              String(repo.currentBranch || "(detached/unknown)")
+            )}</strong></p>
+            <p class="git-repo-origin"><span>HEAD</span><code>${escapeHtml(
+              shortSha(String(repo.head || "unknown"))
+            )}</code></p>
+            <p class="git-repo-origin"><span>last commit</span><strong>${escapeHtml(
+              formatUnixDate(repo.lastCommitUnix)
+            )}</strong></p>
+            <p class="git-repo-origin"><span>worktrees</span><strong>${formatCount(worktrees.length)}</strong></p>
+          </div>
           <ul class="git-worktree-list">${worktreeItems || "<li>No worktrees listed.</li>"}</ul>
         </section>
       `;
@@ -734,6 +875,87 @@ function renderMcpList(containerEl, items) {
       return `<div class="mcp-list-item"><span class="mcp-item-key">${label}</span><span class="mcp-item-value">${value}</span></div>`;
     })
     .join("");
+}
+
+function updateGithubPaginationControls(totalPages, startIndex, endIndex) {
+  if (githubScanPageStatusEl) {
+    if (totalPages <= 0) {
+      githubScanPageStatusEl.textContent = "Page 0 of 0";
+    } else {
+      githubScanPageStatusEl.textContent = `Page ${githubScanPage} of ${totalPages} (${formatCount(
+        startIndex
+      )}-${formatCount(endIndex)} of ${formatCount(githubScanRepos.length)})`;
+    }
+  }
+
+  if (githubPrevPageBtn) {
+    githubPrevPageBtn.disabled = totalPages <= 1 || githubScanPage <= 1;
+  }
+  if (githubNextPageBtn) {
+    githubNextPageBtn.disabled = totalPages <= 1 || githubScanPage >= totalPages;
+  }
+}
+
+function normalizeGithubRepo(repo, index) {
+  const repoRoot = String(repo?.repoRoot || repo?.probePath || `repo-${index + 1}`);
+  const worktrees = Array.isArray(repo?.worktrees)
+    ? repo.worktrees.map((worktree) => ({
+        path: String(worktree?.path || ""),
+        head: String(worktree?.head || ""),
+        branch: String(worktree?.branch || ""),
+        detached: Boolean(worktree?.detached)
+      }))
+    : [];
+
+  return {
+    repoRoot,
+    origin: String(repo?.origin || ""),
+    currentBranch: String(repo?.currentBranch || ""),
+    head: String(repo?.head || ""),
+    lastCommitUnix: parsePositiveNumber(repo?.lastCommitUnix, 0),
+    worktrees
+  };
+}
+
+function parsePositiveNumber(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+function shortSha(value) {
+  const text = String(value || "");
+  if (!/^[0-9a-f]{7,40}$/i.test(text)) {
+    return text;
+  }
+  return text.slice(0, 10);
+}
+
+function formatRepoRecency(unixTs) {
+  if (!unixTs) {
+    return "Last commit unknown";
+  }
+
+  const deltaSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixTs);
+  if (deltaSeconds < 60) {
+    return "Updated <1 min ago";
+  }
+  if (deltaSeconds < 3600) {
+    return `Updated ${Math.floor(deltaSeconds / 60)} min ago`;
+  }
+  if (deltaSeconds < 86400) {
+    return `Updated ${Math.floor(deltaSeconds / 3600)} hr ago`;
+  }
+  return `Updated ${Math.floor(deltaSeconds / 86400)} day ago`;
+}
+
+function formatUnixDate(unixTs) {
+  if (!unixTs) {
+    return "Unknown";
+  }
+  return new Date(unixTs * 1000).toLocaleString();
 }
 
 async function loadLinearSettings() {

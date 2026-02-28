@@ -124,19 +124,21 @@ Notes:
 ## App DB + ingestion core (`hack-10`)
 
 - Main process now owns a local SQLite database at:
-  - `<electron userData>/monitor.sqlite`
+  - default shared path: `~/.monitor/monitor.sqlite` (shared across worktrees)
+  - optional override at launch: `MONITOR_DB_PATH=/absolute/path/to/monitor.sqlite npm run start`
 - Ingestion sources:
   - `~/.codex/history.jsonl`
   - `~/.codex/sessions/**/*.jsonl`
 - Ingestion is idempotent using deterministic event IDs from file path + line + payload hash.
 - Renderer reads dashboard summaries over IPC only (`preload.js` bridge), with no direct file/DB access.
 - Overview panel includes:
-  - Manual `Run Ingestion`
+  - `Refresh View` (reloads cached DB data immediately)
+  - `Refresh From Sources` (runs ingestion then refreshes UI)
   - Event/session counts and source breakdown
 - Usage panel includes:
   - 24h token/cost rollups by model
 - Health panel includes:
-  - Codex home detection and last-ingest metadata
+  - shared DB path, codex home detection, and last-ingest metadata
 ## MCP + Skills (inside Electron)
 
 - In the `MCP + Skills` panel, use `Lookback (days)` and `Refresh Snapshot` to scan local Codex session logs.
