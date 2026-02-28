@@ -2,20 +2,20 @@
   "checks": {
     "singleBuildChartCard": true,
     "noSeparateDependencyCanvas": true,
-    "hasUnifiedDependencyMapButton": true,
+    "noSeparateDependencyMapButton": true,
     "detailsPaneHasRoom": true,
-    "dependencyGraphFitsInitialViewport": true,
+    "graphFitsInitialViewport": true,
     "edgesAreCurved": true,
     "linearGraphFitsInitialViewport": true
   },
   "metrics": {
-    "dependency": {
+    "graph": {
       "shellWidth": 844,
       "graphSectionWidth": 490,
       "detailSectionWidth": 366,
       "graphClientWidth": 462,
-      "graphScrollWidth": 464,
-      "edgePath": "M1270.547,84.576L1304.771,92.813C1338.994,101.051,1407.441,117.525,1441.665,138.263C1475.889,159,1475.889,184,1475.889,209C1475.889,234,1475.889,259,1475.889,284C1475.889,309,1475.889,334,1475.889,359C1475.889,384,1475.889,409,1475.889,434C1475.889,459,1475.889,484,1475.889,509C1475.889,534,1475.889,559,1475.889,576.833C1475.889,594.667,1475.889,605.333,1475.889,610.667L1475.889,616"
+      "graphScrollWidth": 462,
+      "edgePath": "M152.335,86L145.138,92C137.941,98,123.547,110,116.35,123.333C109.152,136.667,109.152,151.333,109.152,158.667L109.152,166"
     },
     "linear": {
       "detailSectionWidth": 366,

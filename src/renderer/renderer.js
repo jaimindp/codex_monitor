@@ -1239,7 +1239,10 @@ function initializeGraphNavigationControls() {
     graphZoomOutBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel - GRAPH_ZOOM_STEP));
   }
   if (graphZoomResetBtn) {
-    graphZoomResetBtn.addEventListener("click", () => setGraphZoom(graphDefaultZoomLevel));
+    graphZoomResetBtn.addEventListener("click", () => {
+      setGraphZoom(graphDefaultZoomLevel);
+      centerGraphViewport();
+    });
   }
 
   if (!graphOutputEl) {
@@ -1269,8 +1272,7 @@ function initializeGraphZoomForRenderedSvg() {
   graphDefaultZoomLevel = computeGraphFitZoom(baseSize, graphOutputEl);
   graphZoomLevel = graphDefaultZoomLevel;
   applyGraphZoom();
-  graphOutputEl.scrollTop = 0;
-  graphOutputEl.scrollLeft = 0;
+  centerGraphViewport();
 }
 
 function computeGraphBaseSize(svg) {
@@ -1330,6 +1332,20 @@ function applyGraphVisualPolish() {
     edgePath.setAttribute("stroke-linejoin", "round");
     edgePath.setAttribute("stroke-width", "2");
   });
+
+  graphOutputEl.querySelectorAll(".node .label foreignObject > div").forEach((labelDiv) => {
+    if (!(labelDiv instanceof HTMLElement)) {
+      return;
+    }
+    labelDiv.style.display = "flex";
+    labelDiv.style.alignItems = "center";
+    labelDiv.style.justifyContent = "center";
+    labelDiv.style.textAlign = "center";
+    labelDiv.style.whiteSpace = "normal";
+    labelDiv.style.width = "100%";
+    labelDiv.style.height = "100%";
+    labelDiv.style.lineHeight = "1.3";
+  });
 }
 
 function applyGraphZoom() {
@@ -1342,6 +1358,19 @@ function applyGraphZoom() {
   svg.style.width = `${Math.round(graphBaseSize.width * graphZoomLevel)}px`;
   svg.style.height = `${Math.round(graphBaseSize.height * graphZoomLevel)}px`;
   updateGraphZoomControls();
+}
+
+function centerGraphViewport() {
+  if (!graphOutputEl || !graphBaseSize.width || !graphBaseSize.height) {
+    return;
+  }
+
+  const scaledWidth = graphBaseSize.width * graphZoomLevel;
+  const scaledHeight = graphBaseSize.height * graphZoomLevel;
+  const targetScrollLeft = Math.max(0, (scaledWidth - graphOutputEl.clientWidth) / 2);
+  const targetScrollTop = Math.max(0, (scaledHeight - graphOutputEl.clientHeight) / 2);
+  graphOutputEl.scrollLeft = Math.round(targetScrollLeft);
+  graphOutputEl.scrollTop = Math.round(targetScrollTop);
 }
 
 function clampGraphZoom(nextZoom) {
