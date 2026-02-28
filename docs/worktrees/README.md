@@ -14,6 +14,7 @@ This folder tracks worktree-specific context and plans.
 - `hack-18-mcp-and-skill-tracking`: [hack-18-mcp-and-skill-tracking/README.md](./hack-18-mcp-and-skill-tracking/README.md)
 - `hack-34-dep-map-interactive-navigation`: [hack-34-dep-map-interactive-navigation/README.md](./hack-34-dep-map-interactive-navigation/README.md)
 - `hack-35-remove-linear-graph-intro-text`: [hack-35-remove-linear-graph-intro-text/README.md](./hack-35-remove-linear-graph-intro-text/README.md)
+- `hack-36-codex-model-and-cost-usage-tracking`: [hack-36-codex-model-and-cost-usage-tracking/README.md](./hack-36-codex-model-and-cost-usage-tracking/README.md)
 - `hack-37-git-file-research-tracking`: [hack-37-git-file-research-tracking/README.md](./hack-37-git-file-research-tracking/README.md)
 
 ## Planned/Upcoming Worktree Docs

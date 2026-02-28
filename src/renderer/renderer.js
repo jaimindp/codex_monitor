@@ -8,16 +8,6 @@ const graphStatusEl = document.getElementById("graph-status");
 const settingsStatusEl = document.getElementById("settings-status");
 const graphOutputEl = document.getElementById("graph-output");
 const graphDetailsEl = document.getElementById("graph-details");
-const githubRootInput = document.getElementById("github-root-input");
-const githubScanBtn = document.getElementById("github-scan-btn");
-const githubScanStatusEl = document.getElementById("github-scan-status");
-const githubScanSummaryEl = document.getElementById("github-scan-summary");
-const githubScanOverviewEl = document.getElementById("github-scan-overview");
-const githubPageSizeSelect = document.getElementById("github-page-size");
-const githubPrevPageBtn = document.getElementById("github-prev-page-btn");
-const githubNextPageBtn = document.getElementById("github-next-page-btn");
-const githubScanPageStatusEl = document.getElementById("github-scan-page-status");
-const githubScanResultsEl = document.getElementById("github-scan-results");
 const graphZoomInBtn = document.getElementById("graph-zoom-in");
 const graphZoomOutBtn = document.getElementById("graph-zoom-out");
 const graphZoomResetBtn = document.getElementById("graph-zoom-reset");
@@ -25,32 +15,22 @@ const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
-const monitorRefreshDashboardBtn = document.getElementById("monitor-refresh-dashboard");
-const monitorRunIngestionBtn = document.getElementById("monitor-run-ingestion");
-const monitorIngestStatusEl = document.getElementById("monitor-ingest-status");
-const metricTotalEventsEl = document.getElementById("metric-total-events");
-const metricEvents24hEl = document.getElementById("metric-events-24h");
-const metricSessionsEl = document.getElementById("metric-sessions");
-const metricLastEventEl = document.getElementById("metric-last-event");
-const metricSourceBreakdownEl = document.getElementById("metric-source-breakdown");
-const usageRollupsEl = document.getElementById("usage-rollups");
-const healthSummaryEl = document.getElementById("health-summary");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const themeToggleGlyph = document.getElementById("theme-toggle-glyph");
-const mcpDaysInput = document.getElementById("mcp-days-input");
-const mcpRefreshBtn = document.getElementById("mcp-refresh-btn");
-const mcpStatusEl = document.getElementById("mcp-status");
-const mcpLastUpdatedEl = document.getElementById("mcp-last-updated");
-const mcpSummaryEl = document.getElementById("mcp-summary");
-const mcpTopMcpEl = document.getElementById("mcp-top-mcp");
-const mcpTopSkillsEl = document.getElementById("mcp-top-skills");
-const mcpFilesEl = document.getElementById("mcp-files");
+const usageRefreshBtn = document.getElementById("usage-refresh-btn");
+const usageStatusEl = document.getElementById("usage-status");
+const usageTotalSessionsEl = document.getElementById("usage-total-sessions");
+const usageModelCountEl = document.getElementById("usage-model-count");
+const usageTotalTokensEl = document.getElementById("usage-total-tokens");
+const usageEstimatedCostEl = document.getElementById("usage-estimated-cost");
+const usageModelTableBodyEl = document.getElementById("usage-model-table-body");
+const usageEffortTableBodyEl = document.getElementById("usage-effort-table-body");
+const usageSessionTableBodyEl = document.getElementById("usage-session-table-body");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]"));
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
-let isGithubScanInFlight = false;
 let graphZoomLevel = 1;
 let graphDefaultZoomLevel = 1;
 let graphBaseSize = { width: 0, height: 0 };
@@ -64,17 +44,10 @@ let graphPanState = {
 };
 let currentScreenId = "overview";
 let currentTheme = "dark";
-const GITHUB_SCAN_ROOTS_STORAGE_KEY = "monitor.githubScan.roots";
-let isMcpSnapshotInFlight = false;
-const DEFAULT_GITHUB_SCAN_PAGE_SIZE = 25;
-let githubScanRepos = [];
-let githubScanPage = 1;
-let githubScanPageSize = DEFAULT_GITHUB_SCAN_PAGE_SIZE;
+let usageLoadInFlight = false;
+let hasLoadedUsageOnce = false;
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
-const MCP_MIN_DAYS = 1;
-const MCP_MAX_DAYS = 30;
-const MCP_DEFAULT_DAYS = 7;
 const GRAPH_ZOOM_MIN = 0.2;
 const GRAPH_ZOOM_MAX = 2.2;
 const GRAPH_ZOOM_STEP = 0.15;
@@ -140,9 +113,9 @@ window.onGraphNodeClick = (nodeId) => {
 initializeNavigation();
 initializeThemeControls();
 initializeGraphNavigationControls();
+initializeUsageControls();
 setGraphStatus("Graph status: waiting for Linear data");
 renderGraphDetailsMessage("Load Linear Issues to render the dependency graph.");
-initializeMonitorData();
 
 if (graphLoadMockBtn) {
   graphLoadMockBtn.addEventListener("click", async () => {
@@ -167,27 +140,6 @@ if (linearSaveSettingsBtn && linearApiKeyInput && linearTeamKeyInput) {
 }
 
 loadLinearSettings();
-initializeGitRepoScanPanel();
-initializeMcpSkillTracking();
-
-function initializeMcpSkillTracking() {
-  if (!mcpRefreshBtn || !mcpDaysInput) {
-    return;
-  }
-
-  mcpRefreshBtn.addEventListener("click", () => loadMcpSkillSnapshot(false));
-  mcpDaysInput.addEventListener("change", () => {
-    const days = getValidatedMcpDays();
-    mcpDaysInput.value = String(days);
-  });
-
-  setMcpStatus("MCP status: ready");
-  renderMcpList(mcpSummaryEl, [{ label: "Load status", value: "Press Refresh Snapshot" }]);
-  renderMcpList(mcpTopMcpEl, []);
-  renderMcpList(mcpTopSkillsEl, []);
-  renderMcpList(mcpFilesEl, []);
-  loadMcpSkillSnapshot(true);
-}
 
 function initializeThemeControls() {
   if (themeToggleBtn) {
@@ -286,6 +238,10 @@ function setActiveScreen(screenId) {
     screenTitleEl.textContent = meta.title;
     screenSubtitleEl.textContent = meta.subtitle;
   }
+
+  if (screenId === "usage") {
+    maybeLoadUsageData();
+  }
 }
 
 function setGraphStatus(message) {
@@ -300,174 +256,6 @@ function setSettingsStatus(message) {
   }
 }
 
-function setGithubScanStatus(message) {
-  if (githubScanStatusEl) {
-    githubScanStatusEl.textContent = message;
-  }
-}
-
-function setGithubScanSummary(message) {
-  if (githubScanSummaryEl) {
-    githubScanSummaryEl.textContent = message;
-  }
-}
-
-function setMonitorIngestStatus(message) {
-  if (monitorIngestStatusEl) {
-    monitorIngestStatusEl.textContent = message;
-  }
-}
-
-async function initializeMonitorData() {
-  if (!window.monitor?.monitorData) {
-    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
-    return;
-  }
-
-  if (monitorRunIngestionBtn) {
-    monitorRunIngestionBtn.addEventListener("click", runManualIngestion);
-  }
-  if (monitorRefreshDashboardBtn) {
-    monitorRefreshDashboardBtn.addEventListener("click", refreshDashboardView);
-  }
-
-  await refreshDashboardFromDb();
-}
-
-async function refreshDashboardView() {
-  if (monitorRefreshDashboardBtn) {
-    monitorRefreshDashboardBtn.disabled = true;
-  }
-  try {
-    await refreshDashboardFromDb();
-    updateLastRefresh("Overview (cached)");
-  } finally {
-    if (monitorRefreshDashboardBtn) {
-      monitorRefreshDashboardBtn.disabled = false;
-    }
-  }
-}
-
-async function runManualIngestion() {
-  if (!window.monitor?.monitorData) {
-    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
-    return;
-  }
-
-  if (monitorRunIngestionBtn) {
-    monitorRunIngestionBtn.disabled = true;
-  }
-  setMonitorIngestStatus("Ingestion status: running...");
-
-  try {
-    const result = await window.monitor.monitorData.runIngestion();
-    setMonitorIngestStatus(
-      `Ingestion status: ${result.eventsInserted} new events, ${result.linesScanned} lines scanned (${result.durationMs} ms)`
-    );
-    await refreshDashboardFromDb();
-    updateLastRefresh("Overview");
-  } catch (error) {
-    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
-  } finally {
-    if (monitorRunIngestionBtn) {
-      monitorRunIngestionBtn.disabled = false;
-    }
-  }
-}
-
-async function refreshDashboardFromDb() {
-  if (!window.monitor?.monitorData) {
-    return;
-  }
-
-  try {
-    const dashboard = await window.monitor.monitorData.getDashboard();
-    if (!dashboard) {
-      return;
-    }
-    renderOverviewMetrics(dashboard.overview);
-    renderUsageRollups(dashboard.usage);
-    renderHealthSummary(dashboard.health);
-    setMonitorIngestStatus(
-      `Ingestion status: loaded ${formatInteger(dashboard.overview?.totalEvents || 0)} events from app DB`
-    );
-  } catch (error) {
-    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
-  }
-}
-
-function renderOverviewMetrics(overview) {
-  if (!overview) {
-    return;
-  }
-
-  if (metricTotalEventsEl) {
-    metricTotalEventsEl.textContent = formatInteger(overview.totalEvents);
-  }
-  if (metricEvents24hEl) {
-    metricEvents24hEl.textContent = formatInteger(overview.events24h);
-  }
-  if (metricSessionsEl) {
-    metricSessionsEl.textContent = formatInteger(overview.distinctSessions);
-  }
-  if (metricLastEventEl) {
-    metricLastEventEl.textContent = overview.lastEventTs
-      ? formatDate(new Date(overview.lastEventTs * 1000).toISOString())
-      : "never";
-  }
-  if (metricSourceBreakdownEl) {
-    if (!Array.isArray(overview.sources) || overview.sources.length === 0) {
-      metricSourceBreakdownEl.textContent = "Sources: none";
-    } else {
-      const sourceSummary = overview.sources
-        .map((item) => `${item.source}: ${formatInteger(item.count)}`)
-        .join(" | ");
-      metricSourceBreakdownEl.textContent = `Sources: ${sourceSummary}`;
-    }
-  }
-}
-
-function renderUsageRollups(usageRows) {
-  if (!usageRollupsEl) {
-    return;
-  }
-
-  if (!Array.isArray(usageRows) || usageRows.length === 0) {
-    usageRollupsEl.textContent = "No usage data yet.";
-    return;
-  }
-
-  usageRollupsEl.innerHTML = usageRows
-    .map(
-      (row) =>
-        `<div class=\"usage-row\"><strong>${escapeHtml(row.model)}</strong><span>${formatInteger(
-          row.totalTokens
-        )} tokens</span><span>$${Number(row.estimatedCostUsd || 0).toFixed(4)}</span></div>`
-    )
-    .join("");
-}
-
-function renderHealthSummary(health) {
-  if (!healthSummaryEl || !health) {
-    return;
-  }
-
-  const lastIngestLabel = health.lastIngestAt
-    ? formatDate(new Date(health.lastIngestAt * 1000).toISOString())
-    : "never";
-
-  healthSummaryEl.innerHTML = `
-    <div class="health-row"><span>Shared DB</span><strong>${escapeHtml(health.dbPath || "n/a")}</strong></div>
-    <div class="health-row"><span>Codex home</span><strong>${escapeHtml(health.codexHome || "n/a")}</strong></div>
-    <div class="health-row"><span>History file</span><strong>${health.historyPresent ? "present" : "missing"}</strong></div>
-    <div class="health-row"><span>Last ingest source</span><strong>${escapeHtml(health.lastIngestSource || "n/a")}</strong></div>
-    <div class="health-row"><span>Last ingest time</span><strong>${escapeHtml(lastIngestLabel)}</strong></div>
-  `;
-}
-
-function formatInteger(value) {
-  return Number(value || 0).toLocaleString();
-}
 function updateLastRefresh(sourceName) {
   if (!lastRefreshValueEl) {
     return;
@@ -477,485 +265,207 @@ function updateLastRefresh(sourceName) {
   lastRefreshValueEl.textContent = `${now.toLocaleTimeString()} (${sourceName})`;
 }
 
-function initializeGitRepoScanPanel() {
-  if (!githubRootInput || !githubScanBtn) {
-    return;
-  }
-
-  hydrateGithubRootInput();
-
-  if (!window.monitor?.githubRepos) {
-    githubScanBtn.disabled = true;
-    setGithubScanStatus("Git scan status: unavailable (secure IPC is not ready)");
-    return;
-  }
-
-  githubScanBtn.addEventListener("click", runGithubScanFromInput);
-
-  if (githubPageSizeSelect) {
-    githubPageSizeSelect.value = String(DEFAULT_GITHUB_SCAN_PAGE_SIZE);
-    githubPageSizeSelect.addEventListener("change", () => {
-      githubScanPageSize = parsePositiveNumber(githubPageSizeSelect.value, DEFAULT_GITHUB_SCAN_PAGE_SIZE);
-      githubScanPage = 1;
-      renderGithubScanPage();
+function initializeUsageControls() {
+  if (usageRefreshBtn) {
+    usageRefreshBtn.addEventListener("click", () => {
+      loadUsageData(true);
     });
   }
-
-  if (githubPrevPageBtn) {
-    githubPrevPageBtn.addEventListener("click", () => {
-      githubScanPage = Math.max(1, githubScanPage - 1);
-      renderGithubScanPage();
-    });
-  }
-
-  if (githubNextPageBtn) {
-    githubNextPageBtn.addEventListener("click", () => {
-      githubScanPage += 1;
-      renderGithubScanPage();
-    });
-  }
-
-  updateGithubPaginationControls(0, 0, 0);
 }
 
-async function hydrateGithubRootInput() {
-  if (!githubRootInput) {
+function maybeLoadUsageData() {
+  if (hasLoadedUsageOnce || usageLoadInFlight) {
+    return;
+  }
+  loadUsageData(false);
+}
+
+function setUsageStatus(message) {
+  if (usageStatusEl) {
+    usageStatusEl.textContent = message;
+  }
+}
+
+function setUsageLoadingState(isLoading) {
+  if (usageRefreshBtn) {
+    usageRefreshBtn.disabled = isLoading;
+  }
+}
+
+async function loadUsageData(forceRefresh) {
+  if (!window.monitor?.codexUsage || usageLoadInFlight) {
+    setUsageStatus("Usage status: local usage bridge unavailable");
     return;
   }
 
-  const savedRoots = getStoredGithubScanRoots();
-  if (savedRoots) {
-    githubRootInput.value = savedRoots;
-    return;
-  }
+  usageLoadInFlight = true;
+  setUsageLoadingState(true);
+  setUsageStatus(
+    forceRefresh
+      ? "Usage status: refreshing from local Codex data..."
+      : "Usage status: loading local Codex usage snapshot..."
+  );
 
-  let defaultRoot = "~/Documents";
-  if (window.monitor?.githubRepos?.getDefaultRoot) {
-    try {
-      const payload = await window.monitor.githubRepos.getDefaultRoot();
-      if (payload && payload.root) {
-        defaultRoot = String(payload.root);
-      }
-    } catch (error) {
-      setGithubScanStatus(`Git scan status: could not load default root (${errorMessage(error)})`);
-    }
-  }
-
-  githubRootInput.value = defaultRoot;
-}
-
-function getStoredGithubScanRoots() {
   try {
-    return localStorage.getItem(GITHUB_SCAN_ROOTS_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function persistGithubScanRoots(rawValue) {
-  try {
-    localStorage.setItem(GITHUB_SCAN_ROOTS_STORAGE_KEY, rawValue);
-  } catch {
-    // Ignore localStorage write failures.
-  }
-}
-
-function getValidatedGithubScanRootsFromInput() {
-  if (!githubRootInput) {
-    throw new Error("Git scan input is unavailable");
-  }
-
-  const roots = githubRootInput.value
-    .split(/[\n,]+/)
-    .map((value) => value.trim())
-    .filter(Boolean);
-
-  if (roots.length === 0) {
-    throw new Error("enter at least one scan root path");
-  }
-  if (roots.length > 10) {
-    throw new Error("enter at most 10 scan roots");
-  }
-
-  return roots;
-}
-
-async function runGithubScanFromInput() {
-  if (!githubScanBtn || !window.monitor?.githubRepos || isGithubScanInFlight) {
-    return;
-  }
-
-  let roots = [];
-  try {
-    roots = getValidatedGithubScanRootsFromInput();
+    const snapshot = forceRefresh
+      ? await window.monitor.codexUsage.refresh()
+      : await window.monitor.codexUsage.get();
+    renderUsageSnapshot(snapshot);
+    hasLoadedUsageOnce = true;
+    updateLastRefresh("Usage");
   } catch (error) {
-    setGithubScanStatus(`Git scan status: ${errorMessage(error)}`);
-    return;
-  }
-
-  isGithubScanInFlight = true;
-  githubScanBtn.disabled = true;
-  setGithubScanStatus("Git scan status: scanning local repositories...");
-  setGithubScanSummary("Scan summary: running...");
-
-  try {
-    const report = await window.monitor.githubRepos.scan({ roots });
-    persistGithubScanRoots(roots.join(", "));
-    renderGithubScanResults(report);
-    setGithubScanStatus("Git scan status: completed");
-    updateLastRefresh("Git + Worktrees");
-  } catch (error) {
-    setGithubScanStatus(`Git scan status: ${errorMessage(error)}`);
-    setGithubScanSummary("Scan summary: failed");
+    setUsageStatus(`Usage status: ${errorMessage(error)}`);
   } finally {
-    isGithubScanInFlight = false;
-    githubScanBtn.disabled = false;
+    usageLoadInFlight = false;
+    setUsageLoadingState(false);
   }
 }
 
-function renderGithubScanResults(report) {
-  const repos = Array.isArray(report?.repos) ? report.repos : [];
-  const roots = Array.isArray(report?.roots) ? report.roots : [];
-  const candidateCount = Number.isFinite(report?.gitCandidateCount) ? report.gitCandidateCount : 0;
-  const generatedAt = report?.generatedAt ? formatDate(report.generatedAt) : "Unknown";
+function renderUsageSnapshot(snapshot) {
+  const status = String(snapshot?.status || "unknown").toLowerCase();
+  const summary = snapshot?.summary || {};
+  const byModel = Array.isArray(snapshot?.byModel) ? snapshot.byModel : [];
+  const byEffort = Array.isArray(snapshot?.byEffort) ? snapshot.byEffort : [];
+  const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  const warnings = Array.isArray(snapshot?.warnings) ? snapshot.warnings : [];
+  const windowHours = Number(summary.windowHours || snapshot?.window?.hours || 24);
 
-  githubScanRepos = repos
-    .map((repo, index) => normalizeGithubRepo(repo, index))
-    .sort((left, right) => {
-      if (right.lastCommitUnix !== left.lastCommitUnix) {
-        return right.lastCommitUnix - left.lastCommitUnix;
-      }
-      return left.repoRoot.localeCompare(right.repoRoot);
-    });
-  githubScanPage = 1;
+  if (usageTotalSessionsEl) {
+    usageTotalSessionsEl.textContent = formatInteger(summary.totalSessions);
+  }
+  if (usageModelCountEl) {
+    usageModelCountEl.textContent = formatInteger(summary.modelsTracked);
+  }
+  if (usageTotalTokensEl) {
+    usageTotalTokensEl.textContent = formatInteger(summary.totalTokens);
+  }
+  if (usageEstimatedCostEl) {
+    usageEstimatedCostEl.textContent = formatCurrency(summary.estimatedCostUsd);
+  }
 
-  setGithubScanSummary(
-    `Scan summary: ${githubScanRepos.length} GitHub repos | ${candidateCount} git candidates | generated ${generatedAt}`
-  );
+  if (status === "error") {
+    setUsageStatus(`Usage status: ${warnings[0] || "failed to load usage snapshot"}`);
+  } else if (warnings.length > 0) {
+    setUsageStatus(`Usage status: loaded last ${windowHours}h with warnings (${warnings.length})`);
+  } else {
+    const generatedAt = formatDate(snapshot?.generatedAt);
+    setUsageStatus(
+      `Usage status: loaded ${formatInteger(sessions.length)} sessions in last ${windowHours}h (${generatedAt})`
+    );
+  }
 
-  renderGithubScanOverview({
-    roots,
-    candidateCount,
-    generatedAt,
-    repos: githubScanRepos
-  });
-  renderGithubScanPage();
+  renderUsageModelRows(byModel);
+  renderUsageEffortRows(byEffort);
+  renderUsageSessionRows(sessions);
 }
 
-function renderGithubScanOverview({ roots, candidateCount, generatedAt, repos }) {
-  if (!githubScanOverviewEl) {
+function renderUsageModelRows(rows) {
+  if (!usageModelTableBodyEl) {
     return;
   }
 
-  const rootCount = roots.length;
-  const worktreeCount = repos.reduce((sum, repo) => sum + repo.worktrees.length, 0);
-  const detachedCount = repos.reduce(
-    (sum, repo) => sum + repo.worktrees.filter((worktree) => worktree.detached).length,
-    0
-  );
-  const withRecentCommit = repos.filter((repo) => repo.lastCommitUnix > 0).length;
-
-  githubScanOverviewEl.innerHTML = `
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Scan Roots</span>
-      <strong>${formatCount(rootCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">GitHub Repos</span>
-      <strong>${formatCount(repos.length)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Worktrees</span>
-      <strong>${formatCount(worktreeCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Detached</span>
-      <strong>${formatCount(detachedCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Recent Commit Known</span>
-      <strong>${formatCount(withRecentCommit)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Git Candidates</span>
-      <strong>${formatCount(candidateCount)}</strong>
-    </div>
-    <p class="git-overview-roots">
-      Roots: ${escapeHtml(roots.join(", ") || "(none)")} | Generated: ${escapeHtml(generatedAt)}
-    </p>
-  `;
-}
-
-function renderGithubScanPage() {
-  if (!githubScanResultsEl) {
+  if (!rows.length) {
+    usageModelTableBodyEl.innerHTML = `<tr><td colspan="5">No model usage rows found.</td></tr>`;
     return;
   }
 
-  if (githubScanRepos.length === 0) {
-    githubScanResultsEl.textContent = "No GitHub repos found for the provided roots.";
-    updateGithubPaginationControls(0, 0, 0);
-    return;
-  }
-
-  const pageSize = Math.max(1, githubScanPageSize);
-  const totalPages = Math.max(1, Math.ceil(githubScanRepos.length / pageSize));
-  githubScanPage = Math.min(totalPages, Math.max(1, githubScanPage));
-  const startIndex = (githubScanPage - 1) * pageSize;
-  const endIndex = Math.min(githubScanRepos.length, startIndex + pageSize);
-  const pageRepos = githubScanRepos.slice(startIndex, endIndex);
-  updateGithubPaginationControls(totalPages, startIndex + 1, endIndex);
-
-  githubScanResultsEl.innerHTML = pageRepos
-    .map((repo) => {
-      const worktrees = repo.worktrees;
-      const worktreeItems = worktrees
-        .map((worktree) => {
-          const branchLabel = worktree.branch || (worktree.detached ? "(detached)" : "(unknown)");
-          return `
-            <li class="git-worktree-row">
-              <code class="git-path">${escapeHtml(String(worktree.path || ""))}</code>
-              <span class="git-worktree-meta">
-                <span class="git-branch-pill">${escapeHtml(branchLabel)}</span>
-                <span>HEAD ${escapeHtml(shortSha(String(worktree.head || "unknown")))}</span>
-              </span>
-            </li>
-          `;
-        })
-        .join("");
-
+  const html = rows
+    .map((row) => {
       return `
-        <section class="git-repo-card">
-          <div class="git-repo-card-head">
-            <h4>${escapeHtml(String(repo.repoRoot || ""))}</h4>
-            <span class="git-last-seen">${escapeHtml(formatRepoRecency(repo.lastCommitUnix))}</span>
-          </div>
-          <div class="git-repo-facts">
-            <p class="git-repo-origin"><span>origin</span><code>${escapeHtml(
-              String(repo.origin || "(none)")
-            )}</code></p>
-            <p class="git-repo-origin"><span>branch</span><strong>${escapeHtml(
-              String(repo.currentBranch || "(detached/unknown)")
-            )}</strong></p>
-            <p class="git-repo-origin"><span>HEAD</span><code>${escapeHtml(
-              shortSha(String(repo.head || "unknown"))
-            )}</code></p>
-            <p class="git-repo-origin"><span>last commit</span><strong>${escapeHtml(
-              formatUnixDate(repo.lastCommitUnix)
-            )}</strong></p>
-            <p class="git-repo-origin"><span>worktrees</span><strong>${formatCount(worktrees.length)}</strong></p>
-          </div>
-          <ul class="git-worktree-list">${worktreeItems || "<li>No worktrees listed.</li>"}</ul>
-        </section>
+        <tr>
+          <td>${escapeHtml(row.model || "unknown")}</td>
+          <td>${formatInteger(row.sessions)}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatRate(row.rateUsdPer1MTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+        </tr>
       `;
     })
     .join("");
-}
-function setMcpStatus(message) {
-  if (mcpStatusEl) {
-    mcpStatusEl.textContent = message;
-  }
+  usageModelTableBodyEl.innerHTML = html;
 }
 
-function setMcpLastUpdated(isoTimestamp) {
-  if (!mcpLastUpdatedEl) {
-    return;
-  }
-  const date = new Date(isoTimestamp);
-  mcpLastUpdatedEl.textContent = Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
-}
-
-function getValidatedMcpDays() {
-  if (!mcpDaysInput) {
-    return MCP_DEFAULT_DAYS;
-  }
-  const parsed = Number.parseInt(String(mcpDaysInput.value || "").trim(), 10);
-  if (!Number.isFinite(parsed)) {
-    return MCP_DEFAULT_DAYS;
-  }
-  return Math.max(MCP_MIN_DAYS, Math.min(MCP_MAX_DAYS, parsed));
-}
-
-async function loadMcpSkillSnapshot(isAutoLoad) {
-  if (isMcpSnapshotInFlight) {
+function renderUsageSessionRows(rows) {
+  if (!usageSessionTableBodyEl) {
     return;
   }
 
-  if (!window.monitor?.mcpSkillTracking) {
-    setMcpStatus("MCP status: secure tracking bridge unavailable");
+  if (!rows.length) {
+    usageSessionTableBodyEl.innerHTML = `<tr><td colspan="6">No sessions found.</td></tr>`;
     return;
   }
 
-  const days = getValidatedMcpDays();
-  if (mcpDaysInput) {
-    mcpDaysInput.value = String(days);
-  }
-
-  isMcpSnapshotInFlight = true;
-  if (mcpRefreshBtn) {
-    mcpRefreshBtn.disabled = true;
-  }
-  if (mcpDaysInput) {
-    mcpDaysInput.disabled = true;
-  }
-  setMcpStatus(
-    isAutoLoad ? "MCP status: loading snapshot from local sessions..." : "MCP status: refreshing..."
-  );
-
-  try {
-    const snapshot = await window.monitor.mcpSkillTracking.getSnapshot({ days });
-    renderMcpSnapshot(snapshot);
-    setMcpStatus(`MCP status: scanned ${snapshot.filesScanned} file(s) over ${snapshot.windowDays} day(s)`);
-    setMcpLastUpdated(snapshot.generatedAt);
-    updateLastRefresh("MCP + Skills");
-  } catch (error) {
-    setMcpStatus(`MCP status: ${errorMessage(error)}`);
-  } finally {
-    isMcpSnapshotInFlight = false;
-    if (mcpRefreshBtn) {
-      mcpRefreshBtn.disabled = false;
-    }
-    if (mcpDaysInput) {
-      mcpDaysInput.disabled = false;
-    }
-  }
-}
-
-function renderMcpSnapshot(snapshot) {
-  if (!snapshot) {
-    return;
-  }
-
-  renderMcpList(mcpSummaryEl, [
-    { label: "Window", value: `${snapshot.windowDays} day(s)` },
-    { label: "Files scanned", value: snapshot.filesScanned },
-    { label: "Lines scanned", value: snapshot.linesScanned },
-    { label: "MCP tool calls", value: snapshot.mcpToolCallsTotal },
-    { label: "Skill mentions", value: snapshot.skillMentionsTotal },
-    { label: "Parse errors", value: snapshot.parseErrors }
-  ]);
-
-  renderMcpList(
-    mcpTopMcpEl,
-    Array.isArray(snapshot.topMcpTools)
-      ? snapshot.topMcpTools.map((item) => ({ label: item.name, value: item.count }))
-      : []
-  );
-
-  renderMcpList(
-    mcpTopSkillsEl,
-    Array.isArray(snapshot.topSkills)
-      ? snapshot.topSkills.map((item) => ({ label: item.name, value: item.count }))
-      : []
-  );
-
-  const warningRows = Array.isArray(snapshot.warnings)
-    ? snapshot.warnings.map((warning) => ({ label: "Warning", value: warning }))
-    : [];
-  const fileRows = Array.isArray(snapshot.recentFiles)
-    ? snapshot.recentFiles.map((filePath) => ({ label: "File", value: filePath }))
-    : [];
-  renderMcpList(mcpFilesEl, [...warningRows, ...fileRows]);
-}
-
-function renderMcpList(containerEl, items) {
-  if (!containerEl) {
-    return;
-  }
-
-  const listItems = Array.isArray(items) ? items : [];
-  if (!listItems.length) {
-    containerEl.innerHTML = `<div class="mcp-list-item"><span class="mcp-item-key">No data</span><span class="mcp-item-value">-</span></div>`;
-    return;
-  }
-
-  containerEl.innerHTML = listItems
-    .map((item) => {
-      const label = escapeHtml(item.label || "Item");
-      const value = escapeHtml(item.value ?? "");
-      return `<div class="mcp-list-item"><span class="mcp-item-key">${label}</span><span class="mcp-item-value">${value}</span></div>`;
+  const html = rows
+    .slice(0, 50)
+    .map((row) => {
+      const sessionId = String(row.id || "").slice(0, 8) || "unknown";
+      return `
+        <tr>
+          <td><span class="mono-text">${escapeHtml(sessionId)}</span></td>
+          <td>${escapeHtml(row.model || "unknown")}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+          <td>${escapeHtml(row.gitBranch || "-")}</td>
+          <td>${escapeHtml(formatDate(row.updatedAt))}</td>
+        </tr>
+      `;
     })
     .join("");
+  usageSessionTableBodyEl.innerHTML = html;
 }
 
-function updateGithubPaginationControls(totalPages, startIndex, endIndex) {
-  if (githubScanPageStatusEl) {
-    if (totalPages <= 0) {
-      githubScanPageStatusEl.textContent = "Page 0 of 0";
-    } else {
-      githubScanPageStatusEl.textContent = `Page ${githubScanPage} of ${totalPages} (${formatCount(
-        startIndex
-      )}-${formatCount(endIndex)} of ${formatCount(githubScanRepos.length)})`;
-    }
+function renderUsageEffortRows(rows) {
+  if (!usageEffortTableBodyEl) {
+    return;
   }
 
-  if (githubPrevPageBtn) {
-    githubPrevPageBtn.disabled = totalPages <= 1 || githubScanPage <= 1;
+  if (!rows.length) {
+    usageEffortTableBodyEl.innerHTML = `<tr><td colspan="4">No effort rows found.</td></tr>`;
+    return;
   }
-  if (githubNextPageBtn) {
-    githubNextPageBtn.disabled = totalPages <= 1 || githubScanPage >= totalPages;
-  }
+
+  const html = rows
+    .map((row) => {
+      return `
+        <tr>
+          <td>${escapeHtml(String(row.effort || "unknown").toUpperCase())}</td>
+          <td>${formatInteger(row.sessions)}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  usageEffortTableBodyEl.innerHTML = html;
 }
 
-function normalizeGithubRepo(repo, index) {
-  const repoRoot = String(repo?.repoRoot || repo?.probePath || `repo-${index + 1}`);
-  const worktrees = Array.isArray(repo?.worktrees)
-    ? repo.worktrees.map((worktree) => ({
-        path: String(worktree?.path || ""),
-        head: String(worktree?.head || ""),
-        branch: String(worktree?.branch || ""),
-        detached: Boolean(worktree?.detached)
-      }))
-    : [];
-
-  return {
-    repoRoot,
-    origin: String(repo?.origin || ""),
-    currentBranch: String(repo?.currentBranch || ""),
-    head: String(repo?.head || ""),
-    lastCommitUnix: parsePositiveNumber(repo?.lastCommitUnix, 0),
-    worktrees
-  };
+function formatInteger(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return "0";
+  }
+  return Math.round(numeric).toLocaleString();
 }
 
-function parsePositiveNumber(value, fallback) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return fallback;
+function formatCurrency(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "$0.00";
   }
-  return parsed;
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(numeric);
 }
 
-function shortSha(value) {
-  const text = String(value || "");
-  if (!/^[0-9a-f]{7,40}$/i.test(text)) {
-    return text;
+function formatRate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "$0.00";
   }
-  return text.slice(0, 10);
-}
-
-function formatRepoRecency(unixTs) {
-  if (!unixTs) {
-    return "Last commit unknown";
-  }
-
-  const deltaSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixTs);
-  if (deltaSeconds < 60) {
-    return "Updated <1 min ago";
-  }
-  if (deltaSeconds < 3600) {
-    return `Updated ${Math.floor(deltaSeconds / 60)} min ago`;
-  }
-  if (deltaSeconds < 86400) {
-    return `Updated ${Math.floor(deltaSeconds / 3600)} hr ago`;
-  }
-  return `Updated ${Math.floor(deltaSeconds / 86400)} day ago`;
-}
-
-function formatUnixDate(unixTs) {
-  if (!unixTs) {
-    return "Unknown";
-  }
-  return new Date(unixTs * 1000).toLocaleString();
+  return `$${numeric.toFixed(2)}`;
 }
 
 async function loadLinearSettings() {
@@ -1619,10 +1129,7 @@ function initializeGraphNavigationControls() {
     graphZoomOutBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel - GRAPH_ZOOM_STEP));
   }
   if (graphZoomResetBtn) {
-    graphZoomResetBtn.addEventListener("click", () => {
-      setGraphZoom(graphDefaultZoomLevel);
-      centerGraphViewport();
-    });
+    graphZoomResetBtn.addEventListener("click", () => setGraphZoom(graphDefaultZoomLevel));
   }
 
   if (!graphOutputEl) {
@@ -1652,7 +1159,8 @@ function initializeGraphZoomForRenderedSvg() {
   graphDefaultZoomLevel = computeGraphFitZoom(baseSize, graphOutputEl);
   graphZoomLevel = graphDefaultZoomLevel;
   applyGraphZoom();
-  centerGraphViewport();
+  graphOutputEl.scrollTop = 0;
+  graphOutputEl.scrollLeft = 0;
 }
 
 function computeGraphBaseSize(svg) {
@@ -1712,20 +1220,6 @@ function applyGraphVisualPolish() {
     edgePath.setAttribute("stroke-linejoin", "round");
     edgePath.setAttribute("stroke-width", "2");
   });
-
-  graphOutputEl.querySelectorAll(".node .label foreignObject > div").forEach((labelDiv) => {
-    if (!(labelDiv instanceof HTMLElement)) {
-      return;
-    }
-    labelDiv.style.display = "flex";
-    labelDiv.style.alignItems = "center";
-    labelDiv.style.justifyContent = "center";
-    labelDiv.style.textAlign = "center";
-    labelDiv.style.whiteSpace = "normal";
-    labelDiv.style.width = "100%";
-    labelDiv.style.height = "100%";
-    labelDiv.style.lineHeight = "1.3";
-  });
 }
 
 function applyGraphZoom() {
@@ -1738,19 +1232,6 @@ function applyGraphZoom() {
   svg.style.width = `${Math.round(graphBaseSize.width * graphZoomLevel)}px`;
   svg.style.height = `${Math.round(graphBaseSize.height * graphZoomLevel)}px`;
   updateGraphZoomControls();
-}
-
-function centerGraphViewport() {
-  if (!graphOutputEl || !graphBaseSize.width || !graphBaseSize.height) {
-    return;
-  }
-
-  const scaledWidth = graphBaseSize.width * graphZoomLevel;
-  const scaledHeight = graphBaseSize.height * graphZoomLevel;
-  const targetScrollLeft = Math.max(0, (scaledWidth - graphOutputEl.clientWidth) / 2);
-  const targetScrollTop = Math.max(0, (scaledHeight - graphOutputEl.clientHeight) / 2);
-  graphOutputEl.scrollLeft = Math.round(targetScrollLeft);
-  graphOutputEl.scrollTop = Math.round(targetScrollTop);
 }
 
 function clampGraphZoom(nextZoom) {

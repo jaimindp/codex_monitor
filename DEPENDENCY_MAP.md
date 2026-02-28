@@ -100,17 +100,16 @@ graph TD
   H15 --> H39
   H39 --> H17
 
+  class H10 inprog;
   class H13 inprog;
-  class H19 inprog;
   class H14 inprog;
   class H34 inprog;
-  class H25 blocked;
+  class H25 inprog;
   class H35 inprog;
-  class H18,H38 done;
-  class H37 done;
-  class H10 done;
-  class H11,H31 todo;
-  class H12,H15,H16,H17,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H32,H33,H36,H39 blocked;
+  class H36 inprog;
+  class H38 done;
+  class H37 todo;
+  class H11,H12,H15,H16,H17,H18,H19,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H31,H32,H33,H39 blocked;
 
   classDef todo fill:#e2e3e5,stroke:#6c757d,color:#343a40;
   classDef inprog fill:#fff3cd,stroke:#b58900,color:#664d03;
