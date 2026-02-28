@@ -684,7 +684,7 @@ textarea {
 .usage-controls {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: minmax(180px, 240px) auto;
+  grid-template-columns: minmax(180px, 240px) minmax(180px, 240px) auto;
   gap: 10px;
   align-items: end;
 }
@@ -770,6 +770,90 @@ textarea {
 
 .usage-row strong {
   word-break: break-word;
+}
+
+.live-sessions-section {
+  margin-top: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.live-sessions-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.live-sessions-header h4 {
+  margin: 0;
+}
+
+.live-sessions-list {
+  display: grid;
+  gap: 8px;
+}
+
+.live-session-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px;
+  background: var(--panel-strong);
+  display: grid;
+  gap: 8px;
+}
+
+.live-session-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.live-session-head strong {
+  word-break: break-word;
+}
+
+.live-session-chip {
+  border-radius: 999px;
+  border: 1px solid #3a526d;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: rgba(12, 20, 31, 0.74);
+}
+
+.live-session-chip.state-active {
+  border-color: #1e8e3e;
+  color: #b8f2c8;
+}
+
+.live-session-chip.state-idle {
+  border-color: #b58900;
+  color: #ffe8a3;
+}
+
+.live-session-chip.state-dead {
+  border-color: #b02a37;
+  color: #ffc8cf;
+}
+
+.live-session-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 6px 10px;
+}
+
+.live-session-meta span {
+  color: var(--muted);
+}
+
+.live-session-meta strong {
+  color: var(--text);
+  margin-right: 4px;
+  font-weight: 600;
 }
 
 .health-summary {

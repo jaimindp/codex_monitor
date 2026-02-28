@@ -55,6 +55,14 @@ graph TD
   H37["hack-37: git-file-research-tracking"]
   H38["hack-38: agent-orchestrated-end-to-end-ticket-flow"]
   H39["hack-39: automated-repo-intake-and-planning"]
+  H40["hack-40: live-sessions-status-chips-and-auto-refresh"]
+  H41["hack-41: unified-mcp-health-control-center"]
+  H42["hack-42: rule-based-alerts-and-severity-badges"]
+  H43["hack-43: home-sparklines-and-health-badges"]
+  H44["hack-44: repo-and-git-activity-timeline-strip"]
+  H45["hack-45: setup-diagnostics-and-first-run-checks"]
+  H46["hack-46: incremental-scan-cache-and-deadline-badges"]
+  H47["hack-47: project-level-session-and-cost-breakdown"]
 
   H10 --> H11
   H10 --> H12
@@ -99,6 +107,22 @@ graph TD
   H20 --> H39
   H15 --> H39
   H39 --> H17
+  H19 --> H40
+  H18 --> H41
+  H31 --> H41
+  H10 --> H42
+  H18 --> H42
+  H19 --> H42
+  H31 --> H42
+  H11 --> H43
+  H12 --> H44
+  H30 --> H44
+  H10 --> H45
+  H20 --> H46
+  H39 --> H46
+  H10 --> H47
+  H11 --> H47
+  H12 --> H47
 
   class H10 inprog;
   class H13 inprog;
@@ -106,11 +130,12 @@ graph TD
   class H34 inprog;
   class H25 inprog;
   class H35 inprog;
+  class H40 done;
   class H31 inprog;
 class H36 done;
   class H38 done;
   class H37 todo;
-  class H11,H12,H15,H16,H17,H18,H19,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H32,H33,H39 blocked;
+  class H11,H12,H15,H16,H17,H18,H19,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H32,H33,H39,H41,H42,H43,H44,H45,H46,H47 blocked;
 
   classDef todo fill:#e2e3e5,stroke:#6c757d,color:#343a40;
   classDef inprog fill:#fff3cd,stroke:#b58900,color:#664d03;
