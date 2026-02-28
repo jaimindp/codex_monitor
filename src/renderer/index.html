@@ -15,18 +15,13 @@
         </div>
         <nav class="screen-nav" aria-label="Main screens">
           <button class="nav-btn" data-screen="overview" type="button">Overview</button>
-          <button class="nav-btn" data-screen="timeline" type="button">Timeline</button>
-          <button class="nav-btn" data-screen="live-sessions" type="button">Live Sessions</button>
+          <button class="nav-btn" data-screen="build-chart" type="button">Build Chart</button>
+          <button class="nav-btn" data-screen="agents" type="button">Agents</button>
           <button class="nav-btn" data-screen="usage" type="button">Usage</button>
-          <button class="nav-btn" data-screen="credits-context" type="button">Credits + Context</button>
           <button class="nav-btn" data-screen="mcp-skills" type="button">MCP + Skills</button>
           <button class="nav-btn" data-screen="git-worktrees" type="button">Git + Worktrees</button>
-          <button class="nav-btn" data-screen="dependency-map" type="button">Dependency Map</button>
-          <button class="nav-btn" data-screen="linear-graph" type="button">Linear Graph</button>
           <button class="nav-btn" data-screen="health" type="button">Health</button>
           <button class="nav-btn" data-screen="settings" type="button">Settings</button>
-          <button class="nav-btn" data-screen="build-snapshots" type="button">Build Snapshots</button>
-          <button class="nav-btn" data-screen="server-manager" type="button">Server Manager</button>
         </nav>
         <div class="sidebar-footer">
           <button
@@ -53,25 +48,73 @@
         <main class="screen-panel is-active" data-screen-panel="overview">
           <div class="card">
             <h3>Overview</h3>
-            <p>Use the left navigation to switch monitor views. This app shell now keeps navigation and header status shared across screens.</p>
+            <p>
+              Use the left navigation to switch monitor views. This app shell keeps navigation and
+              header status shared across screens.
+            </p>
           </div>
         </main>
 
-        <main class="screen-panel" data-screen-panel="timeline">
-          <div class="card"><h3>Timeline</h3><p>Timeline view placeholder. Implementation lands in task-specific follow-ups.</p></div>
+        <main class="screen-panel" data-screen-panel="build-chart">
+          <div class="card build-chart-card">
+            <header class="build-chart-header">
+              <h3>Build Graph</h3>
+              <p>Single dependency graph powered by Linear relationships.</p>
+            </header>
+            <details id="graph-controls-panel" class="graph-controls-panel" open>
+              <summary>Graph Sources</summary>
+              <div class="graph-controls">
+                <label for="linear-api-key">Linear API Key</label>
+                <input id="linear-api-key" type="password" placeholder="lin_api_..." />
+                <label for="linear-team-key">Team Key</label>
+                <input id="linear-team-key" type="text" placeholder="ENG" />
+                <div class="row graph-action-row">
+                  <button id="linear-save-settings" type="button">Save Settings</button>
+                  <button id="graph-load-linear" type="button">Load Linear Issues</button>
+                  <button id="graph-load-mock" type="button">Load Mock Data</button>
+                </div>
+                <p id="settings-status" class="settings-status">Settings status: idle</p>
+              </div>
+            </details>
+            <p id="graph-status" class="graph-status">Graph status: idle</p>
+            <div class="graph-shell">
+              <section class="graph-canvas-panel">
+                <h3>Graph</h3>
+                <div class="graph-toolbar">
+                  <div class="row graph-zoom-controls">
+                    <button id="graph-zoom-out" type="button" aria-label="Zoom out graph">-</button>
+                    <button id="graph-zoom-reset" type="button" aria-label="Reset graph zoom">100%</button>
+                    <button id="graph-zoom-in" type="button" aria-label="Zoom in graph">+</button>
+                  </div>
+                  <span id="graph-nav-hint" class="graph-nav-hint" aria-live="polite"
+                    >Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.</span
+                  >
+                </div>
+                <div id="graph-output" class="graph-output"></div>
+              </section>
+              <section class="graph-detail-panel">
+                <h3>Issue Details</h3>
+                <div id="graph-details" class="graph-details">Click a node to inspect an issue.</div>
+              </section>
+            </div>
+          </div>
         </main>
-        <main class="screen-panel" data-screen-panel="live-sessions">
-          <div class="card"><h3>Live Sessions</h3><p>Live sessions placeholder.</p></div>
+
+        <main class="screen-panel" data-screen-panel="agents">
+          <div class="card"><h3>Agents</h3><p>Agents panel placeholder.</p></div>
         </main>
+
         <main class="screen-panel" data-screen-panel="usage">
-          <div class="card"><h3>Usage</h3><p>Usage dashboard placeholder.</p></div>
+          <div class="card">
+            <h3>Usage</h3>
+            <p>Usage dashboard placeholder, including timeline and credits/context signals.</p>
+          </div>
         </main>
-        <main class="screen-panel" data-screen-panel="credits-context">
-          <div class="card"><h3>Credits + Context</h3><p>Credits and context placeholder.</p></div>
-        </main>
+
         <main class="screen-panel" data-screen-panel="mcp-skills">
           <div class="card"><h3>MCP + Skills</h3><p>MCP and skills placeholder.</p></div>
         </main>
+
         <main class="screen-panel" data-screen-panel="git-worktrees">
           <div class="card">
             <h3>Git + Worktrees</h3>
@@ -91,53 +134,13 @@
             </div>
           </div>
         </main>
-        <main class="screen-panel" data-screen-panel="dependency-map">
-          <div class="card"><h3>Dependency Map</h3><p>Dependency map panel placeholder.</p></div>
-        </main>
+
         <main class="screen-panel" data-screen-panel="health">
           <div class="card"><h3>Health</h3><p>Health panel placeholder.</p></div>
         </main>
+
         <main class="screen-panel" data-screen-panel="settings">
           <div class="card"><h3>Settings</h3><p>Settings placeholder.</p></div>
-        </main>
-        <main class="screen-panel" data-screen-panel="build-snapshots">
-          <div class="card"><h3>Build Snapshots</h3><p>Build snapshots placeholder.</p></div>
-        </main>
-        <main class="screen-panel" data-screen-panel="server-manager">
-          <div class="card"><h3>Server Manager</h3><p>Server manager placeholder.</p></div>
-        </main>
-
-        <main class="screen-panel" data-screen-panel="linear-graph">
-          <div class="card">
-            <h3>Linear Issue Graph</h3>
-            <p>Interactive Mermaid DAG for Linear issues inside this Electron app.</p>
-            <details id="graph-controls-panel" class="graph-controls-panel" open>
-              <summary>Connection Settings</summary>
-              <div class="graph-controls">
-                <label for="linear-api-key">Linear API Key</label>
-                <input id="linear-api-key" type="password" placeholder="lin_api_..." />
-                <label for="linear-team-key">Team Key</label>
-                <input id="linear-team-key" type="text" placeholder="ENG" />
-                <div class="row">
-                  <button id="linear-save-settings" type="button">Save Settings</button>
-                  <button id="graph-load-linear" type="button">Load Linear Issues</button>
-                  <button id="graph-load-mock" type="button">Load Mock Data</button>
-                </div>
-                <p id="settings-status" class="settings-status">Settings status: idle</p>
-              </div>
-            </details>
-            <p id="graph-status">Graph status: idle</p>
-            <div class="graph-shell">
-              <section>
-                <h3>Graph</h3>
-                <div id="graph-output" class="graph-output"></div>
-              </section>
-              <section>
-                <h3>Details</h3>
-                <div id="graph-details" class="graph-details">Click a node to inspect an issue.</div>
-              </section>
-            </div>
-          </div>
         </main>
       </div>
     </div>

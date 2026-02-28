@@ -92,6 +92,13 @@ CODEX_BIN=/absolute/path/to/codex npm run start
 ## Git + Worktrees
 - Follow `Monitor/WORKTREE.md` for preflight/create/resume/cleanup.
 - One active worktree per task ID.
+- Every time a new worktree is created/resumed, bootstrap it before coding:
+  - Copy env file into that worktree's `Monitor/` folder (for example, `cp /path/to/source/Monitor/.env /path/to/worktree/Monitor/.env`).
+  - Install Electron tooling in that worktree's `Monitor/` folder:
+    - `npm install --save-dev electron`
+    - `npm install --save-dev playwright`
+  - Run Electron-window validation (not browser-page validation) and capture a short verification note/screenshot before marking task `done`.
+  - Keep operator updates explicit in session notes/comments (for example: install Electron, install Playwright, then run Electron-window verification).
 - If this folder is not currently a git repo, do not run worktree commands until inside a valid repo root.
 
 ## Quality Bar

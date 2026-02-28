@@ -52,14 +52,15 @@ The hack is successful if all of the following are true:
 18. MCP health diagnostics and status scoring.
 19. Linear done-ticket to local build-launch flow.
 20. Managed local server lifecycle (start/stop/remove).
+21. Automated repository intake flow (clone repo, deep research, Linear planning board creation, and dependency map generation).
 
 ## 3.2 Out of Scope (Hackathon)
 
-1. GitHub OAuth/API integration.
+1. GitHub OAuth UI flow and long-lived token brokerage.
 2. Invoice-grade billing accuracy claims.
 3. Full graph editing or drag-drop node authoring.
 4. Multi-user cloud sync backend.
-5. Bi-directional Linear editing (create/update issues).
+5. General-purpose bi-directional Linear editing outside the automated onboarding flow.
 
 ## 4) Current Baseline
 
@@ -90,7 +91,8 @@ Current code in `Monitor/` already has:
    2. `~/.codex/sessions/**/*.jsonl`
    3. `~/.codex/state_5.sqlite`
    4. Local git repositories.
-   5. Linear GraphQL API (read-only for this hack).
+   5. GitHub API (repo metadata + open issues) when credentials are provided.
+   6. Linear GraphQL API (read for graph + scoped write for onboarding automation).
 
 ## 5.2 Data Stores
 
@@ -467,6 +469,69 @@ Definition of done:
 1. User can remove a managed server from the app UI in one flow.
 2. Removed servers no longer appear in status, logs, or persisted settings.
 
+### C10 - Automated Repo Intake and Planning
+
+1. User provides:
+   1. GitHub repository URL
+   2. target branch/ref (optional)
+   3. Linear team/project naming overrides (optional)
+2. Intake service clones the repository to a local onboarding workspace path.
+3. A research agent runs X-High depth analysis over:
+   1. source layout and build files
+   2. docs/README and contribution guidance
+   3. open GitHub issues and labels
+4. A planning agent emits structured artifacts:
+   1. epics and implementation tickets
+   2. dependency edges and blocker chains
+   3. execution notes and risk flags
+5. Linear sync provisions a board/project, creates tickets, and creates blocker relations from the dependency edges.
+6. Dependency map generator writes a repo-scoped DAG file at `Monitor/dependency_maps/<repo-slug>.md`.
+7. A summary record appends the onboarded repo and generated artifact links to this master play.
+
+Implementation slices (required order):
+
+1. Slice 0 - Task lifecycle bootstrap:
+   1. use `start-feature-flow` to activate `hack-39` and create/resume worktree context
+   2. record assumptions and target repo in issue comment
+2. Slice 1 - Dry-run pipeline:
+   1. clone repository
+   2. run X-High research agent
+   3. emit artifacts only (`plan.json`, `tickets.json`, `dependencies.json`, dependency-map markdown)
+   4. no Linear writes in this slice
+3. Slice 2 - Linear provisioning + sync:
+   1. create/update project/board
+   2. upsert tickets using stable IDs (`<repo-slug>-NN`)
+   3. upsert blocker relations from dependency edges
+4. Slice 3 - Local execution handoff:
+   1. generate local implementation queue from dependency map
+   2. support `start-feature-flow` handoff for first executable ticket
+5. Slice 4 - Validation + closure:
+   1. run automated tests and Electron Playwright scenario
+   2. use `create-pr-flow` to prepare review package
+   3. use `finish-feature-flow` to close/sync status after validation
+
+Testing requirements for C10:
+
+1. Contract tests for input normalization and repo-slug/idempotency-key generation.
+2. Integration tests for clone + research artifact generation.
+3. Integration tests for Linear upsert idempotency (rerun does not duplicate tickets or blocker links).
+4. Electron Playwright end-to-end test:
+   1. launch Monitor
+   2. submit onboarding inputs
+   3. wait for completion state
+   4. verify generated dependency-map file exists and is parseable
+   5. verify Linear ticket count and blocker links match generated edges
+5. Capture verification artifacts for meaningful UI changes (Playwright JSON + screenshot + short notes).
+
+Definition of done:
+
+1. A single local command can onboard a public repository from URL to Linear ticket graph with blocker links.
+2. Generated Linear tickets carry stable task IDs (`<repo-slug>-NN`) and are grouped into a dedicated project/board.
+3. A repo-specific dependency map file is generated and parseable by Monitor.
+4. Rerunning onboarding for the same repo slug updates existing records instead of duplicating tickets.
+5. Required skill workflow (`start-feature-flow` -> `create-pr-flow` -> `finish-feature-flow`) is reflected in task lifecycle updates.
+6. Electron Playwright onboarding scenario passes and artifacts are stored with task verification notes.
+
 ## 9) Integration Plan (Track A + Track B + Track C)
 
 1. Add a shared top-level nav with screens:
@@ -509,6 +574,7 @@ Proposed task IDs:
 14. `hack-31` mcp-health
 15. `hack-32` linear-done-ticket-build-launch
 16. `hack-33` local-server-management
+17. `hack-39` automated-repo-intake-and-planning
 
 ## 11) Dependency DAG
 
@@ -534,6 +600,10 @@ graph TD
   H20 --> H32
   H10 --> H33[hack-33 local server management]
   H14 --> H33
+  H38[hack-38 agent orchestrated e2e ticket flow] --> H39[hack-39 automated repo intake and planning]
+  H20 --> H39
+  H15 --> H39
+  H39 --> H17
   H30 --> H17
   H31 --> H17
   H32 --> H17
@@ -564,6 +634,10 @@ graph TD
 15. MCP health status reflects server reliability and latency.
 16. Done-ticket build launch action opens mapped local build (or shows fallback message).
 17. Managed local server can be removed safely and stays removed after restart.
+18. Automated repo intake can create Linear tickets/blockers and generate a repo dependency map from a GitHub URL.
+19. Electron Playwright onboarding test validates end-to-end clone -> research -> Linear sync -> dependency-map generation.
+20. Re-running onboarding from the same input updates existing Linear entities without duplicates.
+21. Onboarding failure paths (invalid repo URL, missing credentials, API errors) show clear status messaging in app UI.
 
 ## 12.2 Regression Tests
 
@@ -572,6 +646,8 @@ graph TD
 3. Empty/no-data environment: app shows demo/empty states.
 4. Missing optional telemetry fields do not break parsing.
 5. Dependency map parser tolerates partial/incomplete Mermaid definitions.
+6. Onboarding rerun remains idempotent after app restart.
+7. Existing dependency-map parsing and Linear graph loading remain stable when repo-specific maps are added.
 
 ## 12.3 Performance Targets
 
@@ -597,6 +673,7 @@ graph TD
 12. Remove a managed local server and verify status updates.
 13. Show export to SVG/Mermaid.
 14. Show Health panel and finish with clear value proposition.
+15. Run automated repo onboarding for one sample repo and show generated tickets/blockers + dependency map.
 
 ## 14) Submission Checklist
 
@@ -620,6 +697,12 @@ graph TD
    1. Mitigation: separate `declared` vs `inferred` and expose confidence.
 6. Missing credit fields in some sessions:
    1. Mitigation: nullable schema and "field unavailable" UI states.
+7. Large/legacy repositories can produce noisy ticket plans:
+   1. Mitigation: cap first-pass ticket count, then stage expansions by module.
+8. Creating Linear tickets automatically can duplicate prior work:
+   1. Mitigation: idempotency key by repo slug + branch + plan hash before write operations.
+9. Electron Playwright onboarding tests can be flaky with async graph renders:
+   1. Mitigation: gate assertions on explicit UI status signals and persisted output existence.
 
 ## 16) Decision Log
 
@@ -627,3 +710,4 @@ graph TD
 2. Keep Mermaid for graph MVP, defer React Flow migration.
 3. Keep all sensitive data local, no backend service in MVP.
 4. Treat this file as execution source of truth for scope and dependencies.
+5. Add agent-driven GitHub -> Linear onboarding as a scoped automation path.

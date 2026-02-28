@@ -7,6 +7,7 @@ This file is intentionally limited to git/worktree mechanics only.
 - Keep one active local worktree per task ID.
 - Reuse an existing matching worktree/branch before creating a new one.
 - Do not create duplicate branches for the same task.
+- Keep per-worktree documentation in `docs/worktrees/` and update it in the same session.
 
 ## Naming
 - Branch: `<task-id>-<short-slug>` (example: `hack-12-linear-board-setup`)
@@ -24,6 +25,18 @@ git branch --list "*${TASK_ID}*"
 If one match exists, resume it.  
 If multiple matches exist, consolidate before continuing.
 
+## Worktree Docs (required)
+
+- Index: `docs/worktrees/README.md`
+- Per-worktree doc: `docs/worktrees/<branch-or-task-slug>/README.md`
+- Optional detailed plan: `docs/worktrees/<branch-or-task-slug>/PLAN.md`
+
+Before starting implementation in any tree:
+
+1. Ensure the per-worktree `README.md` exists.
+2. Add or update task ID, branch, path, status, and dependency summary.
+3. If the task is complex, add/update `PLAN.md`.
+
 ## Create Worktree
 
 ```bash
@@ -36,11 +49,24 @@ git fetch origin
 git worktree add "$WT_DIR" -b "$BRANCH"
 ```
 
+Then create docs for the new tree:
+
+```bash
+mkdir -p "docs/worktrees/${BRANCH}"
+touch "docs/worktrees/${BRANCH}/README.md"
+```
+
 ## Resume Existing Worktree
 
 ```bash
 git worktree list
 cd ../<repo-name>-<task-id>-<short-slug>
+```
+
+Then open and refresh the tree doc:
+
+```bash
+${EDITOR:-vi} "docs/worktrees/<branch-or-task-slug>/README.md"
 ```
 
 ## Cleanup After Merge
@@ -54,6 +80,13 @@ git worktree remove "$WT_DIR"
 git branch -d "$BRANCH"
 git worktree prune
 git worktree list
+```
+
+Also archive or remove stale worktree docs if the task is closed:
+
+```bash
+# optional cleanup once merged/closed
+rm -rf "docs/worktrees/${BRANCH}"
 ```
 
 ## Common Errors

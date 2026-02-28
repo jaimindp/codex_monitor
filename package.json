@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron .",
     "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
-    "research:github-local": "node scripts/local-github-repo-worktree-report.js"
+    "research:github-local": "node scripts/local-github-repo-worktree-report.js",
+    "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js"
   },
   "keywords": [
     "electron",
@@ -17,6 +18,7 @@
   "license": "MIT",
   "devDependencies": {
     "@playwright/mcp": "^0.0.68",
-    "electron": "^40.6.1"
+    "electron": "^40.6.1",
+    "playwright": "^1.59.0-alpha-1771104257000"
   }
 }

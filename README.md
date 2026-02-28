@@ -1,7 +1,7 @@
 # Monitor Electron App
 
 Electron monitor UI that can start/stop `codex app-server` and stream logs.
-It also includes an interactive Mermaid-based Linear issue DAG view.
+It includes a unified Mermaid-based Build Chart view for Linear dependency relationships.
 
 ## App shell + shared navigation
 
@@ -11,11 +11,8 @@ It also includes an interactive Mermaid-based Linear issue DAG view.
   - Shared `Last refresh` status chip.
   - Dark/Light theme toggle with persisted preference.
 - Current screens in nav:
-  - Overview, Timeline, Live Sessions, Usage, Credits + Context, MCP + Skills,
-    Git + Worktrees, Dependency Map, Linear Graph, Health, Settings,
-    Build Snapshots, Server Manager.
-- `Linear Graph` is fully functional in this build; non-graph screens are scaffolded
-  placeholders to support progressive integration.
+  - Overview, Build Chart, Agents, Usage, MCP + Skills, Git + Worktrees, Health, Settings.
+- `Build Chart` is the functional graph screen; non-graph screens are scaffolded placeholders.
 
 ## Project structure
 
@@ -62,6 +59,29 @@ npm run research:github-local -- --root ~/Documents/Vault/Hacks --format text
 npm run research:github-local -- --root ~/Documents --root ~/code --format json
 ```
 
+## Ticket Orchestration (Plan -> Implement -> Test -> PR -> Merge)
+
+Use the built-in orchestrator to run a full ticket workflow with three Codex phases:
+
+1. Plan agent (`gpt-5.3-codex` + low effort)
+2. Implementation agent (`gpt-5.3-codex` + medium effort)
+3. Test agent (`gpt-5.3-codex` + high effort)
+
+Then the orchestrator can commit, push, create a PR, and optionally enable auto-merge.
+
+```bash
+npm run orchestrate:ticket -- \
+  --task-id hack-38 \
+  --task-title "agent-orchestrated-end-to-end-ticket-flow" \
+  --ticket-file docs/orchestrator/TICKET_BRIEF_TEMPLATE.md
+```
+
+Runbook and templates:
+- `docs/orchestrator/Agent-Orchestrator-Runbook.md`
+- `docs/orchestrator/TICKET_BRIEF_TEMPLATE.md`
+- `scripts/orchestrator/templates/*`
+- `scripts/orchestrator/schemas/*`
+
 ## Codex app-server integration
 
 - Requires the `codex` CLI on your `PATH`.
@@ -73,17 +93,25 @@ npm run research:github-local -- --root ~/Documents --root ~/code --format json
 CODEX_BIN=/absolute/path/to/codex npm run start
 ```
 
-## Linear issue graph (inside Electron)
+## Build Chart (inside Electron)
 
-- In the `Linear Issue Graph` panel, you can use:
-  - `Load Mock Data` for a local graph preview.
+- In the `Build Chart` panel, you can use one shared graph area:
+  - `Load Linear Issues` renders the dependency map from Linear parent/sub-issue + blocker edges.
+  - `Load Mock Data` is a demo fallback using the same graph model.
   - `Load Linear Issues` with:
     - `Linear API Key` (personal API key)
     - `Team Key` (example: `ENG`)
-- Nodes are clickable and show issue details in the right panel.
+- Linear nodes are clickable and show issue details in the right panel.
 - Edges include both:
   - Parent -> sub-issue relationships.
   - Blocker relationships (blocking issue -> blocked issue).
+- Graph layout is top-to-bottom (vertical) for easier DAG scanning.
+- Node labels are wrapped/truncated for readability on smaller viewports.
+- Navigation controls:
+  - Drag in whitespace to pan.
+  - Scroll to move through the graph canvas.
+  - `+`, `-`, and `%` buttons for zoom in/out/reset-to-fit.
+  - `Ctrl/Cmd + mouse wheel` for pointer-anchored zoom.
 - The first successful `Load Linear Issues` saves `LINEAR_API_KEY` and `LINEAR_TEAM_KEY` in a local `.env` file at the repo root, and these fields are auto-filled on next launch.
 - When saved credentials exist, the app automatically loads Linear issues on startup.
 - Connection settings are available from the dedicated `Settings` page. Use `Save Settings` to persist values or `Load Linear Issues` to save and load in one step.

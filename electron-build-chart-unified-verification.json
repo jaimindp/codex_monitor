@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "singleBuildChartCard": true,
+    "noSeparateDependencyCanvas": true,
+    "hasUnifiedDependencyMapButton": true,
+    "detailsPaneHasRoom": true,
+    "dependencyGraphFitsInitialViewport": true,
+    "edgesAreCurved": true,
+    "linearGraphFitsInitialViewport": true
+  },
+  "metrics": {
+    "dependency": {
+      "shellWidth": 844,
+      "graphSectionWidth": 490,
+      "detailSectionWidth": 366,
+      "graphClientWidth": 462,
+      "graphScrollWidth": 464,
+      "edgePath": "M1270.547,84.576L1304.771,92.813C1338.994,101.051,1407.441,117.525,1441.665,138.263C1475.889,159,1475.889,184,1475.889,209C1475.889,234,1475.889,259,1475.889,284C1475.889,309,1475.889,334,1475.889,359C1475.889,384,1475.889,409,1475.889,434C1475.889,459,1475.889,484,1475.889,509C1475.889,534,1475.889,559,1475.889,576.833C1475.889,594.667,1475.889,605.333,1475.889,610.667L1475.889,616"
+    },
+    "linear": {
+      "detailSectionWidth": 366,
+      "graphClientWidth": 462,
+      "graphScrollWidth": 462
+    }
+  },
+  "notes": [],
+  "dependencyScreenshot": "/Users/jaimin/Documents/Vault/Hacks/Monitor/electron-build-chart-dependency-verification.png",
+  "screenshot": "/Users/jaimin/Documents/Vault/Hacks/Monitor/electron-build-chart-unified-verification.png"
+}

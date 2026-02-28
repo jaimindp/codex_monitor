@@ -13,6 +13,10 @@ const githubScanBtn = document.getElementById("github-scan-btn");
 const githubScanStatusEl = document.getElementById("github-scan-status");
 const githubScanSummaryEl = document.getElementById("github-scan-summary");
 const githubScanResultsEl = document.getElementById("github-scan-results");
+const graphZoomInBtn = document.getElementById("graph-zoom-in");
+const graphZoomOutBtn = document.getElementById("graph-zoom-out");
+const graphZoomResetBtn = document.getElementById("graph-zoom-reset");
+const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
@@ -24,31 +28,43 @@ const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]")
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
 let isGithubScanInFlight = false;
+let graphZoomLevel = 1;
+let graphDefaultZoomLevel = 1;
+let graphBaseSize = { width: 0, height: 0 };
+let graphPanState = {
+  active: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  startScrollLeft: 0,
+  startScrollTop: 0
+};
 let currentScreenId = "overview";
 let currentTheme = "dark";
 const GITHUB_SCAN_ROOTS_STORAGE_KEY = "monitor.githubScan.roots";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const GRAPH_ZOOM_MIN = 0.2;
+const GRAPH_ZOOM_MAX = 2.2;
+const GRAPH_ZOOM_STEP = 0.15;
+const GRAPH_LABEL_WRAP_CHARS = 20;
+const GRAPH_LABEL_MAX_LINES = 3;
 const SCREEN_META = {
   overview: {
     title: "Overview",
     subtitle: "Shared app shell and cross-screen navigation."
   },
-  timeline: {
-    title: "Timeline",
-    subtitle: "Session and event history."
+  "build-chart": {
+    title: "Build Chart",
+    subtitle: "Linear-backed dependency graph (parent + blockers)."
   },
-  "live-sessions": {
-    title: "Live Sessions",
-    subtitle: "Active sessions and status."
+  agents: {
+    title: "Agents",
+    subtitle: "Active agent sessions and status."
   },
   usage: {
     title: "Usage",
-    subtitle: "Usage and cost visibility."
-  },
-  "credits-context": {
-    title: "Credits + Context",
-    subtitle: "Rate limits and context pressure."
+    subtitle: "Usage, timeline, and credits/context visibility."
   },
   "mcp-skills": {
     title: "MCP + Skills",
@@ -58,14 +74,6 @@ const SCREEN_META = {
     title: "Git + Worktrees",
     subtitle: "Branch/worktree health."
   },
-  "dependency-map": {
-    title: "Dependency Map",
-    subtitle: "Task DAG and delivery status."
-  },
-  "linear-graph": {
-    title: "Linear Graph",
-    subtitle: "Parent/sub-issue and blocker relationships."
-  },
   health: {
     title: "Health",
     subtitle: "Operational reliability signals."
@@ -73,14 +81,6 @@ const SCREEN_META = {
   settings: {
     title: "Settings",
     subtitle: "Runtime configuration."
-  },
-  "build-snapshots": {
-    title: "Build Snapshots",
-    subtitle: "Local build snapshot launch points."
-  },
-  "server-manager": {
-    title: "Server Manager",
-    subtitle: "Managed local server controls."
   }
 };
 
@@ -91,7 +91,9 @@ if (window.mermaid) {
     theme: "neutral",
     flowchart: {
       curve: "basis",
-      defaultRenderer: "elk"
+      defaultRenderer: "dagre",
+      nodeSpacing: 14,
+      rankSpacing: 48
     }
   });
 }
@@ -106,6 +108,9 @@ window.onGraphNodeClick = (nodeId) => {
 
 initializeNavigation();
 initializeThemeControls();
+initializeGraphNavigationControls();
+setGraphStatus("Graph status: waiting for Linear data");
+renderGraphDetailsMessage("Load Linear Issues to render the dependency graph.");
 
 if (graphLoadMockBtn) {
   graphLoadMockBtn.addEventListener("click", async () => {
@@ -114,7 +119,7 @@ if (graphLoadMockBtn) {
       const issues = getMockIssues();
       await renderIssueGraph(issues);
       setGraphStatus(`Graph status: rendered ${issues.length} mock issues`);
-      updateLastRefresh("Linear Graph (mock)");
+      updateLastRefresh("Build Chart (mock)");
     } catch (error) {
       setGraphStatus(`Graph status: ${errorMessage(error)}`);
     }
@@ -551,8 +556,8 @@ async function loadLinearIssuesFromInputs(isAutoLoad) {
     const issues = await getTeamIssues(apiKey, team.id);
     await renderIssueGraph(issues);
     setGraphStatus(`Graph status: rendered ${issues.length} issues from ${team.key}`);
+    updateLastRefresh("Build Chart");
     setSettingsStatus(`Settings status: saved and loaded ${issues.length} issues from ${team.key}`);
-    updateLastRefresh("Linear Graph");
     collapseGraphSettingsIfConfigured(apiKey, teamKey);
   } catch (error) {
     const message = errorMessage(error);
@@ -588,21 +593,31 @@ async function renderIssueGraph(issues) {
   if (typeof rendered.bindFunctions === "function") {
     rendered.bindFunctions(graphOutputEl);
   }
+  applyGraphVisualPolish();
+  initializeGraphZoomForRenderedSvg();
   if (graphDetailsEl) {
-    graphDetailsEl.textContent = "Click a node to inspect an issue.";
+    renderGraphDetailsMessage("Click a node to inspect an issue.");
   }
 }
 
 function buildMermaidFlowchart(issues) {
-  const lines = ["flowchart LR"];
+  const lines = ["flowchart TB"];
   const issueMap = new Map();
   const drawnEdges = new Set();
+  const nodeStyles = [];
 
   issues.forEach((issue, index) => {
     const nodeId = `I${index + 1}`;
-    const className = issue.state?.type === "completed" ? "done" : "active";
+    const isDone = issue.state?.type === "completed";
+    const className = isDone ? "done" : "active";
+    const stateColor = normalizeLinearColor(issue.state?.color);
+    const styleString = isDone ? buildDoneNodeStyle() : buildNodeStyle(stateColor);
+    const nodeLabel = formatIssueNodeLabel(issue);
     issueMap.set(nodeId, issue);
-    lines.push(`${nodeId}["${sanitizeLabel(`${issue.identifier}: ${issue.title}`)}"]:::${className}`);
+    lines.push(`${nodeId}["${sanitizeLabel(nodeLabel)}"]:::${className}`);
+    if (styleString) {
+      nodeStyles.push({ nodeId, styleString });
+    }
     lines.push(`click ${nodeId} onGraphNodeClick "Open issue details"`);
   });
 
@@ -657,8 +672,12 @@ function buildMermaidFlowchart(issues) {
     });
   });
 
+  nodeStyles.forEach(({ nodeId, styleString }) => {
+    lines.push(`style ${nodeId} ${styleString}`);
+  });
+
   lines.push("classDef active fill:#dce8ff,stroke:#3973d8,color:#10264f");
-  lines.push("classDef done fill:#daf6df,stroke:#2d8a42,color:#12331d");
+  lines.push("classDef done fill:#d7f7e3,stroke:#1e8e3e,color:#0f5132");
 
   return {
     text: lines.join("\n"),
@@ -671,7 +690,7 @@ function renderGraphDetails(issue) {
     return;
   }
 
-  const safeId = escapeHtml(issue.identifier || "");
+  const safeId = escapeHtml(issue.identifier || "Issue");
   const safeTitle = escapeHtml(issue.title || "");
   const safeState = escapeHtml(issue.state?.name || "Unknown");
   const safePriority = escapeHtml(priorityLabel(issue.priority));
@@ -680,14 +699,37 @@ function renderGraphDetails(issue) {
   const safeUrl = escapeAttribute(issue.url || "https://linear.app");
 
   graphDetailsEl.innerHTML = `
-    <div class="detail-issue-id">${safeId}</div>
-    <div class="detail-item"><strong>${safeTitle}</strong></div>
-    <div class="detail-item">State: ${safeState}</div>
-    <div class="detail-item">Priority: ${safePriority}</div>
-    <div class="detail-item">Assignee: ${safeAssignee}</div>
-    <div class="detail-item">Updated: ${safeUpdated}</div>
-    <div class="detail-item"><a href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a></div>
+    <article class="issue-detail-card">
+      <div class="detail-topline">
+        <span class="detail-issue-id">${safeId}</span>
+        <span class="detail-state-pill">${safeState}</span>
+      </div>
+      <h4 class="detail-title">${safeTitle}</h4>
+      <div class="detail-grid">
+        <div class="detail-row">
+          <span class="detail-label">Priority</span>
+          <span class="detail-value">${safePriority}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Assignee</span>
+          <span class="detail-value">${safeAssignee}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Updated</span>
+          <span class="detail-value">${safeUpdated}</span>
+        </div>
+      </div>
+      <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+    </article>
   `;
+}
+
+function renderGraphDetailsMessage(message) {
+  if (!graphDetailsEl) {
+    return;
+  }
+
+  graphDetailsEl.innerHTML = `<p class="graph-details-placeholder">${escapeHtml(message)}</p>`;
 }
 
 function formatDate(isoTimestamp) {
@@ -718,6 +760,132 @@ function priorityLabel(priority) {
 
 function sanitizeLabel(value) {
   return String(value).replace(/"/g, "'").replace(/\n/g, " ");
+}
+
+function normalizeLinearColor(colorValue) {
+  const raw = String(colorValue || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const normalized = raw.startsWith("#") ? raw : `#${raw}`;
+  if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+  return normalized.toLowerCase();
+}
+
+function buildNodeStyle(stateColor) {
+  if (!stateColor) {
+    return "";
+  }
+  const fill = stateColor;
+  const stroke = darkenHexColor(stateColor, 0.32);
+  const text = getReadableTextColor(stateColor);
+  return `fill:${fill},stroke:${stroke},color:${text}`;
+}
+
+function buildDoneNodeStyle() {
+  return "fill:#d7f7e3,stroke:#1e8e3e,color:#0f5132";
+}
+
+function darkenHexColor(hexColor, amount) {
+  const red = parseInt(hexColor.slice(1, 3), 16);
+  const green = parseInt(hexColor.slice(3, 5), 16);
+  const blue = parseInt(hexColor.slice(5, 7), 16);
+
+  const adjust = (channel) => {
+    const next = Math.round(channel * (1 - amount));
+    return Math.max(0, Math.min(255, next));
+  };
+
+  return `#${toHex(adjust(red))}${toHex(adjust(green))}${toHex(adjust(blue))}`;
+}
+
+function toHex(value) {
+  return value.toString(16).padStart(2, "0");
+}
+
+function getReadableTextColor(hexColor) {
+  const red = parseInt(hexColor.slice(1, 3), 16) / 255;
+  const green = parseInt(hexColor.slice(3, 5), 16) / 255;
+  const blue = parseInt(hexColor.slice(5, 7), 16) / 255;
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return luminance > 0.62 ? "#0f172a" : "#f8fafc";
+}
+
+function formatIssueNodeLabel(issue) {
+  const identifier = String(issue?.identifier || "ISSUE").trim();
+  const title = String(issue?.title || "Untitled").trim();
+  const wrappedTitle = wrapLabelText(title, GRAPH_LABEL_WRAP_CHARS, GRAPH_LABEL_MAX_LINES);
+  return `${identifier}<br/>${wrappedTitle}`;
+}
+
+function wrapLabelText(inputText, maxCharsPerLine, maxLines) {
+  const words = String(inputText || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean);
+  if (!words.length) {
+    return "Untitled";
+  }
+
+  const lines = [];
+  let currentLine = "";
+  const pushLine = (line) => {
+    if (line) {
+      lines.push(line);
+    }
+  };
+
+  for (const word of words) {
+    if (lines.length >= maxLines) {
+      break;
+    }
+
+    if (word.length > maxCharsPerLine) {
+      if (currentLine) {
+        pushLine(currentLine);
+        currentLine = "";
+      }
+      let index = 0;
+      while (index < word.length && lines.length < maxLines) {
+        const chunk = word.slice(index, index + maxCharsPerLine);
+        const isTail = index + maxCharsPerLine >= word.length;
+        if (!isTail && lines.length + 1 === maxLines) {
+          lines.push(`${chunk.slice(0, Math.max(1, maxCharsPerLine - 1))}…`);
+          index = word.length;
+          break;
+        }
+        lines.push(chunk);
+        index += maxCharsPerLine;
+      }
+      continue;
+    }
+
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+    if (candidate.length <= maxCharsPerLine) {
+      currentLine = candidate;
+      continue;
+    }
+
+    pushLine(currentLine);
+    currentLine = word;
+  }
+
+  if (lines.length < maxLines) {
+    pushLine(currentLine);
+  }
+
+  const didTruncate = lines.length >= maxLines && words.join(" ").length > lines.join(" ").length;
+  if (didTruncate) {
+    const lastIndex = lines.length - 1;
+    if (lastIndex >= 0 && !lines[lastIndex].endsWith("…")) {
+      lines[lastIndex] = `${lines[lastIndex].slice(0, Math.max(1, maxCharsPerLine - 1))}…`;
+    }
+  }
+
+  return lines.slice(0, maxLines).join("<br/>");
 }
 
 function escapeHtml(value) {
@@ -777,6 +945,7 @@ async function getTeamIssues(apiKey, teamId) {
               state {
                 name
                 type
+                color
               }
               parent {
                 id
@@ -857,7 +1026,7 @@ function getMockIssues() {
       priority: 2,
       updatedAt: now,
       assignee: { name: "Owner" },
-      state: { name: "In Progress", type: "started" },
+      state: { name: "In Progress", type: "started", color: "#f2c94c" },
       parent: null,
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -870,7 +1039,7 @@ function getMockIssues() {
       priority: 2,
       updatedAt: now,
       assignee: { name: "Backend" },
-      state: { name: "Todo", type: "unstarted" },
+      state: { name: "Todo", type: "unstarted", color: "#94a3b8" },
       parent: { id: "1" },
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -883,7 +1052,7 @@ function getMockIssues() {
       priority: 3,
       updatedAt: now,
       assignee: { name: "Frontend" },
-      state: { name: "Todo", type: "unstarted" },
+      state: { name: "Todo", type: "unstarted", color: "#94a3b8" },
       parent: { id: "1" },
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -896,7 +1065,7 @@ function getMockIssues() {
       priority: 1,
       updatedAt: now,
       assignee: { name: "Infra" },
-      state: { name: "Backlog", type: "backlog" },
+      state: { name: "Backlog", type: "backlog", color: "#64748b" },
       parent: { id: "2" },
       relations: {
         nodes: [
@@ -910,4 +1079,242 @@ function getMockIssues() {
       inverseRelations: { nodes: [] }
     }
   ];
+}
+
+function initializeGraphNavigationControls() {
+  updateGraphZoomControls();
+
+  if (graphZoomInBtn) {
+    graphZoomInBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel + GRAPH_ZOOM_STEP));
+  }
+  if (graphZoomOutBtn) {
+    graphZoomOutBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel - GRAPH_ZOOM_STEP));
+  }
+  if (graphZoomResetBtn) {
+    graphZoomResetBtn.addEventListener("click", () => setGraphZoom(graphDefaultZoomLevel));
+  }
+
+  if (!graphOutputEl) {
+    return;
+  }
+
+  graphOutputEl.addEventListener("pointerdown", onGraphPointerDown);
+  graphOutputEl.addEventListener("pointermove", onGraphPointerMove);
+  graphOutputEl.addEventListener("pointerup", onGraphPointerUp);
+  graphOutputEl.addEventListener("pointercancel", stopGraphPanning);
+  graphOutputEl.addEventListener("lostpointercapture", stopGraphPanning);
+  graphOutputEl.addEventListener("wheel", onGraphWheel, { passive: false });
+}
+
+function initializeGraphZoomForRenderedSvg() {
+  const svg = getGraphSvg();
+  if (!svg || !graphOutputEl) {
+    graphBaseSize = { width: 0, height: 0 };
+    graphZoomLevel = 1;
+    graphDefaultZoomLevel = 1;
+    updateGraphZoomControls();
+    return;
+  }
+
+  const baseSize = computeGraphBaseSize(svg);
+  graphBaseSize = baseSize;
+  graphDefaultZoomLevel = computeGraphFitZoom(baseSize, graphOutputEl);
+  graphZoomLevel = graphDefaultZoomLevel;
+  applyGraphZoom();
+  graphOutputEl.scrollTop = 0;
+  graphOutputEl.scrollLeft = 0;
+}
+
+function computeGraphBaseSize(svg) {
+  const viewBox = svg.viewBox && svg.viewBox.baseVal;
+  if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+    return {
+      width: viewBox.width,
+      height: viewBox.height
+    };
+  }
+
+  const attrWidth = Number.parseFloat(String(svg.getAttribute("width") || ""));
+  const attrHeight = Number.parseFloat(String(svg.getAttribute("height") || ""));
+  if (Number.isFinite(attrWidth) && Number.isFinite(attrHeight) && attrWidth > 0 && attrHeight > 0) {
+    return {
+      width: attrWidth,
+      height: attrHeight
+    };
+  }
+
+  const bounds = svg.getBoundingClientRect();
+  return {
+    width: Math.max(1, bounds.width || 1200),
+    height: Math.max(1, bounds.height || 700)
+  };
+}
+
+function computeGraphFitZoom(baseSize, outputEl) {
+  if (!outputEl || !baseSize.width) {
+    return 1;
+  }
+  const horizontalPadding = 22;
+  const availableWidth = Math.max(1, outputEl.clientWidth - horizontalPadding);
+  const widthFitZoom = availableWidth / baseSize.width;
+  return clampGraphZoom(Math.min(1, widthFitZoom));
+}
+
+function getGraphSvg() {
+  if (!graphOutputEl) {
+    return null;
+  }
+  return graphOutputEl.querySelector("svg");
+}
+
+function applyGraphVisualPolish() {
+  if (!graphOutputEl) {
+    return;
+  }
+
+  graphOutputEl.querySelectorAll(".node rect").forEach((nodeRect) => {
+    nodeRect.setAttribute("rx", "12");
+    nodeRect.setAttribute("ry", "12");
+  });
+
+  graphOutputEl.querySelectorAll(".edgePaths path").forEach((edgePath) => {
+    edgePath.setAttribute("stroke-linecap", "round");
+    edgePath.setAttribute("stroke-linejoin", "round");
+    edgePath.setAttribute("stroke-width", "2");
+  });
+}
+
+function applyGraphZoom() {
+  const svg = getGraphSvg();
+  if (!svg || !graphBaseSize.width || !graphBaseSize.height) {
+    updateGraphZoomControls();
+    return;
+  }
+
+  svg.style.width = `${Math.round(graphBaseSize.width * graphZoomLevel)}px`;
+  svg.style.height = `${Math.round(graphBaseSize.height * graphZoomLevel)}px`;
+  updateGraphZoomControls();
+}
+
+function clampGraphZoom(nextZoom) {
+  return Math.max(GRAPH_ZOOM_MIN, Math.min(GRAPH_ZOOM_MAX, nextZoom));
+}
+
+function setGraphZoom(nextZoom, options = {}) {
+  if (!graphOutputEl) {
+    return;
+  }
+
+  const clampedZoom = clampGraphZoom(nextZoom);
+  const previousZoom = graphZoomLevel;
+  if (Math.abs(clampedZoom - previousZoom) < 0.001) {
+    updateGraphZoomControls();
+    return;
+  }
+
+  const anchorX =
+    typeof options.anchorX === "number" ? options.anchorX : graphOutputEl.clientWidth / 2;
+  const anchorY =
+    typeof options.anchorY === "number" ? options.anchorY : graphOutputEl.clientHeight / 2;
+  const contentX = (graphOutputEl.scrollLeft + anchorX) / previousZoom;
+  const contentY = (graphOutputEl.scrollTop + anchorY) / previousZoom;
+
+  graphZoomLevel = clampedZoom;
+  applyGraphZoom();
+
+  graphOutputEl.scrollLeft = Math.max(0, contentX * graphZoomLevel - anchorX);
+  graphOutputEl.scrollTop = Math.max(0, contentY * graphZoomLevel - anchorY);
+}
+
+function updateGraphZoomControls() {
+  const hasRenderedGraph = Boolean(getGraphSvg());
+  const zoomPercent = `${Math.round(graphZoomLevel * 100)}%`;
+
+  if (graphZoomResetBtn) {
+    graphZoomResetBtn.textContent = zoomPercent;
+    graphZoomResetBtn.disabled = !hasRenderedGraph;
+  }
+  if (graphZoomInBtn) {
+    graphZoomInBtn.disabled = !hasRenderedGraph || graphZoomLevel >= GRAPH_ZOOM_MAX;
+  }
+  if (graphZoomOutBtn) {
+    graphZoomOutBtn.disabled = !hasRenderedGraph || graphZoomLevel <= GRAPH_ZOOM_MIN;
+  }
+  if (graphNavHintEl) {
+    graphNavHintEl.textContent = hasRenderedGraph
+      ? `Zoom ${zoomPercent}. Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.`
+      : "Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.";
+  }
+}
+
+function onGraphPointerDown(event) {
+  if (!graphOutputEl || event.button !== 0 || !getGraphSvg()) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Element && target.closest(".node")) {
+    return;
+  }
+
+  graphPanState = {
+    active: true,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startScrollLeft: graphOutputEl.scrollLeft,
+    startScrollTop: graphOutputEl.scrollTop
+  };
+  graphOutputEl.classList.add("is-panning");
+  graphOutputEl.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function onGraphPointerMove(event) {
+  if (!graphOutputEl || !graphPanState.active || graphPanState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - graphPanState.startX;
+  const deltaY = event.clientY - graphPanState.startY;
+  graphOutputEl.scrollLeft = graphPanState.startScrollLeft - deltaX;
+  graphOutputEl.scrollTop = graphPanState.startScrollTop - deltaY;
+}
+
+function onGraphPointerUp(event) {
+  if (!graphOutputEl || !graphPanState.active || graphPanState.pointerId !== event.pointerId) {
+    return;
+  }
+  stopGraphPanning();
+}
+
+function stopGraphPanning() {
+  if (!graphOutputEl || !graphPanState.active) {
+    return;
+  }
+  if (
+    graphPanState.pointerId !== null &&
+    graphOutputEl.hasPointerCapture(graphPanState.pointerId)
+  ) {
+    graphOutputEl.releasePointerCapture(graphPanState.pointerId);
+  }
+  graphPanState.active = false;
+  graphPanState.pointerId = null;
+  graphOutputEl.classList.remove("is-panning");
+}
+
+function onGraphWheel(event) {
+  if (!graphOutputEl || !getGraphSvg()) {
+    return;
+  }
+
+  if (!event.ctrlKey && !event.metaKey) {
+    return;
+  }
+
+  event.preventDefault();
+  const rect = graphOutputEl.getBoundingClientRect();
+  const anchorX = event.clientX - rect.left;
+  const anchorY = event.clientY - rect.top;
+  const scaleDirection = event.deltaY < 0 ? 1 + GRAPH_ZOOM_STEP : 1 - GRAPH_ZOOM_STEP;
+  setGraphZoom(graphZoomLevel * scaleDirection, { anchorX, anchorY });
 }
