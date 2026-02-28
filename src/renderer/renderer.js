@@ -8,6 +8,10 @@ const graphStatusEl = document.getElementById("graph-status");
 const settingsStatusEl = document.getElementById("settings-status");
 const graphOutputEl = document.getElementById("graph-output");
 const graphDetailsEl = document.getElementById("graph-details");
+const graphZoomInBtn = document.getElementById("graph-zoom-in");
+const graphZoomOutBtn = document.getElementById("graph-zoom-out");
+const graphZoomResetBtn = document.getElementById("graph-zoom-reset");
+const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
@@ -18,10 +22,23 @@ const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]")
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
+let graphZoomLevel = 1;
+let graphBaseSize = { width: 0, height: 0 };
+let graphPanState = {
+  active: false,
+  pointerId: null,
+  startX: 0,
+  startY: 0,
+  startScrollLeft: 0,
+  startScrollTop: 0
+};
 let currentScreenId = "overview";
 let currentTheme = "dark";
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
+const GRAPH_ZOOM_MIN = 0.4;
+const GRAPH_ZOOM_MAX = 2.2;
+const GRAPH_ZOOM_STEP = 0.15;
 const SCREEN_META = {
   overview: {
     title: "Overview",
@@ -99,6 +116,7 @@ window.onGraphNodeClick = (nodeId) => {
 
 initializeNavigation();
 initializeThemeControls();
+initializeGraphNavigationControls();
 
 if (graphLoadMockBtn) {
   graphLoadMockBtn.addEventListener("click", async () => {
@@ -405,13 +423,14 @@ async function renderIssueGraph(issues) {
   if (typeof rendered.bindFunctions === "function") {
     rendered.bindFunctions(graphOutputEl);
   }
+  initializeGraphZoomForRenderedSvg();
   if (graphDetailsEl) {
     graphDetailsEl.textContent = "Click a node to inspect an issue.";
   }
 }
 
 function buildMermaidFlowchart(issues) {
-  const lines = ["flowchart LR"];
+  const lines = ["flowchart TD"];
   const issueMap = new Map();
   const drawnEdges = new Set();
 
@@ -727,4 +746,213 @@ function getMockIssues() {
       inverseRelations: { nodes: [] }
     }
   ];
+}
+
+function initializeGraphNavigationControls() {
+  updateGraphZoomControls();
+
+  if (graphZoomInBtn) {
+    graphZoomInBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel + GRAPH_ZOOM_STEP));
+  }
+  if (graphZoomOutBtn) {
+    graphZoomOutBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel - GRAPH_ZOOM_STEP));
+  }
+  if (graphZoomResetBtn) {
+    graphZoomResetBtn.addEventListener("click", () => setGraphZoom(1));
+  }
+
+  if (!graphOutputEl) {
+    return;
+  }
+
+  graphOutputEl.addEventListener("pointerdown", onGraphPointerDown);
+  graphOutputEl.addEventListener("pointermove", onGraphPointerMove);
+  graphOutputEl.addEventListener("pointerup", onGraphPointerUp);
+  graphOutputEl.addEventListener("pointercancel", stopGraphPanning);
+  graphOutputEl.addEventListener("lostpointercapture", stopGraphPanning);
+  graphOutputEl.addEventListener("wheel", onGraphWheel, { passive: false });
+}
+
+function initializeGraphZoomForRenderedSvg() {
+  const svg = getGraphSvg();
+  if (!svg || !graphOutputEl) {
+    graphBaseSize = { width: 0, height: 0 };
+    graphZoomLevel = 1;
+    updateGraphZoomControls();
+    return;
+  }
+
+  const baseSize = computeGraphBaseSize(svg);
+  graphBaseSize = baseSize;
+  graphZoomLevel = 1;
+  applyGraphZoom();
+  graphOutputEl.scrollTop = 0;
+  graphOutputEl.scrollLeft = Math.max(0, (baseSize.width - graphOutputEl.clientWidth) / 2);
+}
+
+function computeGraphBaseSize(svg) {
+  const viewBox = svg.viewBox && svg.viewBox.baseVal;
+  if (viewBox && viewBox.width > 0 && viewBox.height > 0) {
+    return {
+      width: viewBox.width,
+      height: viewBox.height
+    };
+  }
+
+  const attrWidth = Number.parseFloat(String(svg.getAttribute("width") || ""));
+  const attrHeight = Number.parseFloat(String(svg.getAttribute("height") || ""));
+  if (Number.isFinite(attrWidth) && Number.isFinite(attrHeight) && attrWidth > 0 && attrHeight > 0) {
+    return {
+      width: attrWidth,
+      height: attrHeight
+    };
+  }
+
+  const bounds = svg.getBoundingClientRect();
+  return {
+    width: Math.max(1, bounds.width || 1200),
+    height: Math.max(1, bounds.height || 700)
+  };
+}
+
+function getGraphSvg() {
+  if (!graphOutputEl) {
+    return null;
+  }
+  return graphOutputEl.querySelector("svg");
+}
+
+function applyGraphZoom() {
+  const svg = getGraphSvg();
+  if (!svg || !graphBaseSize.width || !graphBaseSize.height) {
+    updateGraphZoomControls();
+    return;
+  }
+
+  svg.style.width = `${Math.round(graphBaseSize.width * graphZoomLevel)}px`;
+  svg.style.height = `${Math.round(graphBaseSize.height * graphZoomLevel)}px`;
+  updateGraphZoomControls();
+}
+
+function clampGraphZoom(nextZoom) {
+  return Math.max(GRAPH_ZOOM_MIN, Math.min(GRAPH_ZOOM_MAX, nextZoom));
+}
+
+function setGraphZoom(nextZoom, options = {}) {
+  if (!graphOutputEl) {
+    return;
+  }
+
+  const clampedZoom = clampGraphZoom(nextZoom);
+  const previousZoom = graphZoomLevel;
+  if (Math.abs(clampedZoom - previousZoom) < 0.001) {
+    updateGraphZoomControls();
+    return;
+  }
+
+  const anchorX =
+    typeof options.anchorX === "number" ? options.anchorX : graphOutputEl.clientWidth / 2;
+  const anchorY =
+    typeof options.anchorY === "number" ? options.anchorY : graphOutputEl.clientHeight / 2;
+  const contentX = (graphOutputEl.scrollLeft + anchorX) / previousZoom;
+  const contentY = (graphOutputEl.scrollTop + anchorY) / previousZoom;
+
+  graphZoomLevel = clampedZoom;
+  applyGraphZoom();
+
+  graphOutputEl.scrollLeft = Math.max(0, contentX * graphZoomLevel - anchorX);
+  graphOutputEl.scrollTop = Math.max(0, contentY * graphZoomLevel - anchorY);
+}
+
+function updateGraphZoomControls() {
+  const hasRenderedGraph = Boolean(getGraphSvg());
+  const zoomPercent = `${Math.round(graphZoomLevel * 100)}%`;
+
+  if (graphZoomResetBtn) {
+    graphZoomResetBtn.textContent = zoomPercent;
+    graphZoomResetBtn.disabled = !hasRenderedGraph;
+  }
+  if (graphZoomInBtn) {
+    graphZoomInBtn.disabled = !hasRenderedGraph || graphZoomLevel >= GRAPH_ZOOM_MAX;
+  }
+  if (graphZoomOutBtn) {
+    graphZoomOutBtn.disabled = !hasRenderedGraph || graphZoomLevel <= GRAPH_ZOOM_MIN;
+  }
+  if (graphNavHintEl) {
+    graphNavHintEl.textContent = hasRenderedGraph
+      ? `Zoom ${zoomPercent}. Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.`
+      : "Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.";
+  }
+}
+
+function onGraphPointerDown(event) {
+  if (!graphOutputEl || event.button !== 0 || !getGraphSvg()) {
+    return;
+  }
+  const target = event.target;
+  if (target instanceof Element && target.closest(".node")) {
+    return;
+  }
+
+  graphPanState = {
+    active: true,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startScrollLeft: graphOutputEl.scrollLeft,
+    startScrollTop: graphOutputEl.scrollTop
+  };
+  graphOutputEl.classList.add("is-panning");
+  graphOutputEl.setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function onGraphPointerMove(event) {
+  if (!graphOutputEl || !graphPanState.active || graphPanState.pointerId !== event.pointerId) {
+    return;
+  }
+
+  const deltaX = event.clientX - graphPanState.startX;
+  const deltaY = event.clientY - graphPanState.startY;
+  graphOutputEl.scrollLeft = graphPanState.startScrollLeft - deltaX;
+  graphOutputEl.scrollTop = graphPanState.startScrollTop - deltaY;
+}
+
+function onGraphPointerUp(event) {
+  if (!graphOutputEl || !graphPanState.active || graphPanState.pointerId !== event.pointerId) {
+    return;
+  }
+  stopGraphPanning();
+}
+
+function stopGraphPanning() {
+  if (!graphOutputEl || !graphPanState.active) {
+    return;
+  }
+  if (
+    graphPanState.pointerId !== null &&
+    graphOutputEl.hasPointerCapture(graphPanState.pointerId)
+  ) {
+    graphOutputEl.releasePointerCapture(graphPanState.pointerId);
+  }
+  graphPanState.active = false;
+  graphPanState.pointerId = null;
+  graphOutputEl.classList.remove("is-panning");
+}
+
+function onGraphWheel(event) {
+  if (!graphOutputEl || !getGraphSvg()) {
+    return;
+  }
+
+  if (!event.ctrlKey && !event.metaKey) {
+    return;
+  }
+
+  event.preventDefault();
+  const rect = graphOutputEl.getBoundingClientRect();
+  const anchorX = event.clientX - rect.left;
+  const anchorY = event.clientY - rect.top;
+  const scaleDirection = event.deltaY < 0 ? 1 + GRAPH_ZOOM_STEP : 1 - GRAPH_ZOOM_STEP;
+  setGraphZoom(graphZoomLevel * scaleDirection, { anchorX, anchorY });
 }

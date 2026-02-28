@@ -67,6 +67,12 @@ CODEX_BIN=/absolute/path/to/codex npm run start
 - Edges include both:
   - Parent -> sub-issue relationships.
   - Blocker relationships (blocking issue -> blocked issue).
+- Graph layout is top-to-bottom (vertical) for easier DAG scanning.
+- Navigation controls:
+  - Drag in whitespace to pan.
+  - Scroll to move through the graph canvas.
+  - `+`, `-`, and `%` buttons for zoom in/out/reset.
+  - `Ctrl/Cmd + mouse wheel` for pointer-anchored zoom.
 - The first successful `Load Linear Issues` saves `LINEAR_API_KEY` and `LINEAR_TEAM_KEY` in a local `.env` file at the repo root, and these fields are auto-filled on next launch.
 - When saved credentials exist, the app automatically loads Linear issues on startup.
 - Connection settings are available from the dedicated `Settings` page. Use `Save Settings` to persist values or `Load Linear Issues` to save and load in one step.

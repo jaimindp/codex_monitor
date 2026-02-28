@@ -109,6 +109,16 @@
             <div class="graph-shell">
               <section>
                 <h3>Graph</h3>
+                <div class="graph-toolbar">
+                  <div class="row graph-zoom-controls">
+                    <button id="graph-zoom-out" type="button" aria-label="Zoom out graph">-</button>
+                    <button id="graph-zoom-reset" type="button" aria-label="Reset graph zoom">100%</button>
+                    <button id="graph-zoom-in" type="button" aria-label="Zoom in graph">+</button>
+                  </div>
+                  <span id="graph-nav-hint" class="graph-nav-hint" aria-live="polite"
+                    >Drag to pan. Scroll to navigate. Ctrl/Cmd + wheel to zoom.</span
+                  >
+                </div>
                 <div id="graph-output" class="graph-output"></div>
               </section>
               <section>
