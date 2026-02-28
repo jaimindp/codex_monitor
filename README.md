@@ -22,7 +22,7 @@ It also includes an interactive Mermaid-based Linear issue DAG view.
 ## Planning + Tracking
 
 - Dependency ordering and task status live in [`DEPENDENCY_MAP.md`](./DEPENDENCY_MAP.md).
-- Workspace worktree operations are documented in `../WORKTREE.md`.
+- Worktree operations are documented in [`WORKTREE.md`](./WORKTREE.md).
 
 ## Getting started
 
