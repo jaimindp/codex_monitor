@@ -7,6 +7,16 @@ This runbook executes one orchestrator flow that delegates three Codex phases:
 
 The orchestrator enforces gates and then completes PR creation, with optional auto-merge when checks are green.
 
+## Complexity-Based Sub-Agent Routing
+- The orchestrator auto-selects a sub-agent budget from `0` to `5` based on Linear issue complexity.
+- If `--linear-issue` is available, it derives complexity from Linear issue signals (priority, estimate, blockers, scope text).
+- If live Linear lookup is unavailable, it falls back to ticket-brief complexity.
+- Budget is split per phase:
+  - Plan: up to `2`
+  - Implementation: up to full budget
+  - Test: up to `3`
+- Each phase must return `subagent_usage` and is hard-gated so reported usage cannot exceed budget.
+
 ## Prerequisites
 - Run from the task worktree/branch (not `main`/`master`).
 - `codex` CLI installed and authenticated.

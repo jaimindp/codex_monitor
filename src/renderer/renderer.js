@@ -25,16 +25,6 @@ const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
-const monitorRefreshDashboardBtn = document.getElementById("monitor-refresh-dashboard");
-const monitorRunIngestionBtn = document.getElementById("monitor-run-ingestion");
-const monitorIngestStatusEl = document.getElementById("monitor-ingest-status");
-const metricTotalEventsEl = document.getElementById("metric-total-events");
-const metricEvents24hEl = document.getElementById("metric-events-24h");
-const metricSessionsEl = document.getElementById("metric-sessions");
-const metricLastEventEl = document.getElementById("metric-last-event");
-const metricSourceBreakdownEl = document.getElementById("metric-source-breakdown");
-const usageRollupsEl = document.getElementById("usage-rollups");
-const healthSummaryEl = document.getElementById("health-summary");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const themeToggleGlyph = document.getElementById("theme-toggle-glyph");
 const mcpDaysInput = document.getElementById("mcp-days-input");
@@ -45,12 +35,46 @@ const mcpSummaryEl = document.getElementById("mcp-summary");
 const mcpTopMcpEl = document.getElementById("mcp-top-mcp");
 const mcpTopSkillsEl = document.getElementById("mcp-top-skills");
 const mcpFilesEl = document.getElementById("mcp-files");
+const mcpHourlyMcpEl = document.getElementById("mcp-hourly-mcp");
+const mcpHourlySkillsEl = document.getElementById("mcp-hourly-skills");
+const usageRefreshBtn = document.getElementById("usage-refresh-btn");
+const usageStatusEl = document.getElementById("usage-status");
+const usageTotalSessionsEl = document.getElementById("usage-total-sessions");
+const usageModelCountEl = document.getElementById("usage-model-count");
+const usageTotalTokensEl = document.getElementById("usage-total-tokens");
+const usageEstimatedCostEl = document.getElementById("usage-estimated-cost");
+const usageModelTableBodyEl = document.getElementById("usage-model-table-body");
+const usageEffortTableBodyEl = document.getElementById("usage-effort-table-body");
+const usageSessionTableBodyEl = document.getElementById("usage-session-table-body");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]"));
+const agentTaskIdInput = document.getElementById("agent-task-id");
+const agentTaskTitleInput = document.getElementById("agent-task-title");
+const agentTicketBriefInput = document.getElementById("agent-ticket-brief");
+const agentLinearIssueInput = document.getElementById("agent-linear-issue");
+const agentWatchUntilDoneInput = document.getElementById("agent-watch-until-done");
+const agentDryRunInput = document.getElementById("agent-dry-run");
+const agentAllowDirtyInput = document.getElementById("agent-allow-dirty");
+const agentPollSecondsInput = document.getElementById("agent-poll-seconds");
+const agentStartRunBtn = document.getElementById("agent-start-run");
+const agentStopRunBtn = document.getElementById("agent-stop-run");
+const agentStatusEl = document.getElementById("agent-status");
+const agentRunMetaEl = document.getElementById("agent-run-meta");
+const agentTimelineEl = document.getElementById("agent-timeline");
+const agentLogsEl = document.getElementById("agent-logs");
+const managedServerIdInput = document.getElementById("managed-server-id");
+const managedServerNameInput = document.getElementById("managed-server-name");
+const managedServerCommandInput = document.getElementById("managed-server-command");
+const managedServerArgsInput = document.getElementById("managed-server-args");
+const managedServerCwdInput = document.getElementById("managed-server-cwd");
+const managedServerSaveBtn = document.getElementById("managed-server-save");
+const managedServerClearBtn = document.getElementById("managed-server-clear");
+const managedServerStatusEl = document.getElementById("managed-server-status");
+const managedServerListEl = document.getElementById("managed-server-list");
+const managedServerLogsEl = document.getElementById("managed-server-logs");
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
-let isGithubScanInFlight = false;
 let graphZoomLevel = 1;
 let graphDefaultZoomLevel = 1;
 let graphBaseSize = { width: 0, height: 0 };
@@ -70,6 +94,17 @@ const DEFAULT_GITHUB_SCAN_PAGE_SIZE = 25;
 let githubScanRepos = [];
 let githubScanPage = 1;
 let githubScanPageSize = DEFAULT_GITHUB_SCAN_PAGE_SIZE;
+let activeOrchestratorRunId = "";
+let timelineRunId = "";
+let orchestratorLogLines = [];
+let orchestratorTimelineItems = [];
+const orchestratorTimelineKeys = new Set();
+let orchestratorEventUnsubscribe = null;
+let managedServersById = new Map();
+let selectedManagedServerId = "";
+let managedServerEventUnsubscribe = null;
+let usageLoadInFlight = false;
+let hasLoadedUsageOnce = false;
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const MCP_MIN_DAYS = 1;
@@ -80,6 +115,9 @@ const GRAPH_ZOOM_MAX = 2.2;
 const GRAPH_ZOOM_STEP = 0.15;
 const GRAPH_LABEL_WRAP_CHARS = 20;
 const GRAPH_LABEL_MAX_LINES = 3;
+const ORCHESTRATOR_ACTIVE_STATES = new Set(["starting", "running", "stopping"]);
+const ORCHESTRATOR_LOG_MAX = 600;
+const ORCHESTRATOR_TIMELINE_MAX = 80;
 const SCREEN_META = {
   overview: {
     title: "Overview",
@@ -140,9 +178,9 @@ window.onGraphNodeClick = (nodeId) => {
 initializeNavigation();
 initializeThemeControls();
 initializeGraphNavigationControls();
+initializeUsageControls();
 setGraphStatus("Graph status: waiting for Linear data");
 renderGraphDetailsMessage("Load Linear Issues to render the dependency graph.");
-initializeMonitorData();
 
 if (graphLoadMockBtn) {
   graphLoadMockBtn.addEventListener("click", async () => {
@@ -175,6 +213,7 @@ function initializeMcpSkillTracking() {
     return;
   }
 
+  mcpDaysInput.value = String(MCP_DEFAULT_DAYS);
   mcpRefreshBtn.addEventListener("click", () => loadMcpSkillSnapshot(false));
   mcpDaysInput.addEventListener("change", () => {
     const days = getValidatedMcpDays();
@@ -186,8 +225,12 @@ function initializeMcpSkillTracking() {
   renderMcpList(mcpTopMcpEl, []);
   renderMcpList(mcpTopSkillsEl, []);
   renderMcpList(mcpFilesEl, []);
+  renderHourlyBars(mcpHourlyMcpEl, [], "No MCP calls in selected window.");
+  renderHourlyBars(mcpHourlySkillsEl, [], "No skill invocations in selected window.");
   loadMcpSkillSnapshot(true);
 }
+initializeOrchestratorControls();
+initializeManagedServerControls();
 
 function initializeThemeControls() {
   if (themeToggleBtn) {
@@ -286,6 +329,10 @@ function setActiveScreen(screenId) {
     screenTitleEl.textContent = meta.title;
     screenSubtitleEl.textContent = meta.subtitle;
   }
+
+  if (screenId === "usage") {
+    maybeLoadUsageData();
+  }
 }
 
 function setGraphStatus(message) {
@@ -300,174 +347,6 @@ function setSettingsStatus(message) {
   }
 }
 
-function setGithubScanStatus(message) {
-  if (githubScanStatusEl) {
-    githubScanStatusEl.textContent = message;
-  }
-}
-
-function setGithubScanSummary(message) {
-  if (githubScanSummaryEl) {
-    githubScanSummaryEl.textContent = message;
-  }
-}
-
-function setMonitorIngestStatus(message) {
-  if (monitorIngestStatusEl) {
-    monitorIngestStatusEl.textContent = message;
-  }
-}
-
-async function initializeMonitorData() {
-  if (!window.monitor?.monitorData) {
-    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
-    return;
-  }
-
-  if (monitorRunIngestionBtn) {
-    monitorRunIngestionBtn.addEventListener("click", runManualIngestion);
-  }
-  if (monitorRefreshDashboardBtn) {
-    monitorRefreshDashboardBtn.addEventListener("click", refreshDashboardView);
-  }
-
-  await refreshDashboardFromDb();
-}
-
-async function refreshDashboardView() {
-  if (monitorRefreshDashboardBtn) {
-    monitorRefreshDashboardBtn.disabled = true;
-  }
-  try {
-    await refreshDashboardFromDb();
-    updateLastRefresh("Overview (cached)");
-  } finally {
-    if (monitorRefreshDashboardBtn) {
-      monitorRefreshDashboardBtn.disabled = false;
-    }
-  }
-}
-
-async function runManualIngestion() {
-  if (!window.monitor?.monitorData) {
-    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
-    return;
-  }
-
-  if (monitorRunIngestionBtn) {
-    monitorRunIngestionBtn.disabled = true;
-  }
-  setMonitorIngestStatus("Ingestion status: running...");
-
-  try {
-    const result = await window.monitor.monitorData.runIngestion();
-    setMonitorIngestStatus(
-      `Ingestion status: ${result.eventsInserted} new events, ${result.linesScanned} lines scanned (${result.durationMs} ms)`
-    );
-    await refreshDashboardFromDb();
-    updateLastRefresh("Overview");
-  } catch (error) {
-    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
-  } finally {
-    if (monitorRunIngestionBtn) {
-      monitorRunIngestionBtn.disabled = false;
-    }
-  }
-}
-
-async function refreshDashboardFromDb() {
-  if (!window.monitor?.monitorData) {
-    return;
-  }
-
-  try {
-    const dashboard = await window.monitor.monitorData.getDashboard();
-    if (!dashboard) {
-      return;
-    }
-    renderOverviewMetrics(dashboard.overview);
-    renderUsageRollups(dashboard.usage);
-    renderHealthSummary(dashboard.health);
-    setMonitorIngestStatus(
-      `Ingestion status: loaded ${formatInteger(dashboard.overview?.totalEvents || 0)} events from app DB`
-    );
-  } catch (error) {
-    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
-  }
-}
-
-function renderOverviewMetrics(overview) {
-  if (!overview) {
-    return;
-  }
-
-  if (metricTotalEventsEl) {
-    metricTotalEventsEl.textContent = formatInteger(overview.totalEvents);
-  }
-  if (metricEvents24hEl) {
-    metricEvents24hEl.textContent = formatInteger(overview.events24h);
-  }
-  if (metricSessionsEl) {
-    metricSessionsEl.textContent = formatInteger(overview.distinctSessions);
-  }
-  if (metricLastEventEl) {
-    metricLastEventEl.textContent = overview.lastEventTs
-      ? formatDate(new Date(overview.lastEventTs * 1000).toISOString())
-      : "never";
-  }
-  if (metricSourceBreakdownEl) {
-    if (!Array.isArray(overview.sources) || overview.sources.length === 0) {
-      metricSourceBreakdownEl.textContent = "Sources: none";
-    } else {
-      const sourceSummary = overview.sources
-        .map((item) => `${item.source}: ${formatInteger(item.count)}`)
-        .join(" | ");
-      metricSourceBreakdownEl.textContent = `Sources: ${sourceSummary}`;
-    }
-  }
-}
-
-function renderUsageRollups(usageRows) {
-  if (!usageRollupsEl) {
-    return;
-  }
-
-  if (!Array.isArray(usageRows) || usageRows.length === 0) {
-    usageRollupsEl.textContent = "No usage data yet.";
-    return;
-  }
-
-  usageRollupsEl.innerHTML = usageRows
-    .map(
-      (row) =>
-        `<div class=\"usage-row\"><strong>${escapeHtml(row.model)}</strong><span>${formatInteger(
-          row.totalTokens
-        )} tokens</span><span>$${Number(row.estimatedCostUsd || 0).toFixed(4)}</span></div>`
-    )
-    .join("");
-}
-
-function renderHealthSummary(health) {
-  if (!healthSummaryEl || !health) {
-    return;
-  }
-
-  const lastIngestLabel = health.lastIngestAt
-    ? formatDate(new Date(health.lastIngestAt * 1000).toISOString())
-    : "never";
-
-  healthSummaryEl.innerHTML = `
-    <div class="health-row"><span>Shared DB</span><strong>${escapeHtml(health.dbPath || "n/a")}</strong></div>
-    <div class="health-row"><span>Codex home</span><strong>${escapeHtml(health.codexHome || "n/a")}</strong></div>
-    <div class="health-row"><span>History file</span><strong>${health.historyPresent ? "present" : "missing"}</strong></div>
-    <div class="health-row"><span>Last ingest source</span><strong>${escapeHtml(health.lastIngestSource || "n/a")}</strong></div>
-    <div class="health-row"><span>Last ingest time</span><strong>${escapeHtml(lastIngestLabel)}</strong></div>
-  `;
-}
-
-function formatInteger(value) {
-  return Number(value || 0).toLocaleString();
-}
 function updateLastRefresh(sourceName) {
   if (!lastRefreshValueEl) {
     return;
@@ -475,6 +354,14 @@ function updateLastRefresh(sourceName) {
 
   const now = new Date();
   lastRefreshValueEl.textContent = `${now.toLocaleTimeString()} (${sourceName})`;
+}
+
+function initializeUsageControls() {
+  if (usageRefreshBtn) {
+    usageRefreshBtn.addEventListener("click", () => {
+      loadUsageData(true);
+    });
+  }
 }
 
 function initializeGitRepoScanPanel() {
@@ -491,6 +378,7 @@ function initializeGitRepoScanPanel() {
   }
 
   githubScanBtn.addEventListener("click", runGithubScanFromInput);
+  githubScanBtn.title = "Run local scan (Shift+Click to bypass cache)";
 
   if (githubPageSizeSelect) {
     githubPageSizeSelect.value = String(DEFAULT_GITHUB_SCAN_PAGE_SIZE);
@@ -500,48 +388,207 @@ function initializeGitRepoScanPanel() {
       renderGithubScanPage();
     });
   }
-
-  if (githubPrevPageBtn) {
-    githubPrevPageBtn.addEventListener("click", () => {
-      githubScanPage = Math.max(1, githubScanPage - 1);
-      renderGithubScanPage();
-    });
-  }
-
-  if (githubNextPageBtn) {
-    githubNextPageBtn.addEventListener("click", () => {
-      githubScanPage += 1;
-      renderGithubScanPage();
-    });
-  }
-
-  updateGithubPaginationControls(0, 0, 0);
 }
 
-async function hydrateGithubRootInput() {
-  if (!githubRootInput) {
+function setMcpStatus(message) {
+  if (mcpStatusEl) {
+    mcpStatusEl.textContent = message;
+  }
+}
+
+function getValidatedMcpDays() {
+  if (!mcpDaysInput) {
+    return MCP_DEFAULT_DAYS;
+  }
+  const parsed = Number(mcpDaysInput.value);
+  if (!Number.isFinite(parsed)) {
+    return MCP_DEFAULT_DAYS;
+  }
+  return Math.min(MCP_MAX_DAYS, Math.max(MCP_MIN_DAYS, Math.round(parsed)));
+}
+
+async function loadMcpSkillSnapshot(isAutoLoad) {
+  if (!window.monitor?.mcpSkillTracking || isMcpSnapshotInFlight) {
+    setMcpStatus("MCP status: local MCP tracker unavailable");
     return;
   }
 
-  const savedRoots = getStoredGithubScanRoots();
-  if (savedRoots) {
-    githubRootInput.value = savedRoots;
-    return;
+  const days = getValidatedMcpDays();
+  if (mcpDaysInput) {
+    mcpDaysInput.value = String(days);
   }
 
-  let defaultRoot = "~/Documents";
-  if (window.monitor?.githubRepos?.getDefaultRoot) {
-    try {
-      const payload = await window.monitor.githubRepos.getDefaultRoot();
-      if (payload && payload.root) {
-        defaultRoot = String(payload.root);
-      }
-    } catch (error) {
-      setGithubScanStatus(`Git scan status: could not load default root (${errorMessage(error)})`);
+  isMcpSnapshotInFlight = true;
+  if (mcpRefreshBtn) {
+    mcpRefreshBtn.disabled = true;
+  }
+  setMcpStatus(
+    isAutoLoad
+      ? `MCP status: auto-loading ${days}d snapshot...`
+      : `MCP status: refreshing ${days}d snapshot...`
+  );
+
+  try {
+    const snapshot = await window.monitor.mcpSkillTracking.getSnapshot({ days });
+    renderMcpSnapshot(snapshot);
+    updateLastRefresh("MCP + Skills");
+  } catch (error) {
+    setMcpStatus(`MCP status: ${errorMessage(error)}`);
+  } finally {
+    if (mcpRefreshBtn) {
+      mcpRefreshBtn.disabled = false;
     }
+    isMcpSnapshotInFlight = false;
+  }
+}
+
+function renderMcpSnapshot(snapshot) {
+  const topMcpTools = Array.isArray(snapshot?.topMcpTools) ? snapshot.topMcpTools : [];
+  const topSkills = Array.isArray(snapshot?.topSkills) ? snapshot.topSkills : [];
+  const topFiles = Array.isArray(snapshot?.topFiles) ? snapshot.topFiles : [];
+  const hourlyRollup = Array.isArray(snapshot?.hourlyRollup) ? snapshot.hourlyRollup : [];
+  const warnings = Array.isArray(snapshot?.warnings) ? snapshot.warnings : [];
+  const status = String(snapshot?.status || "unknown").toLowerCase();
+
+  setMcpStatus(
+    status === "error"
+      ? `MCP status: ${warnings[0] || "snapshot failed"}`
+      : `MCP status: scanned ${formatInteger(snapshot?.filesScanned)} files (${formatInteger(
+          snapshot?.linesScanned
+        )} lines)`
+  );
+  if (mcpLastUpdatedEl) {
+    mcpLastUpdatedEl.textContent = formatDate(snapshot?.generatedAt);
   }
 
-  githubRootInput.value = defaultRoot;
+  renderMcpList(mcpSummaryEl, [
+    { label: "Days", value: snapshot?.days ?? "-" },
+    { label: "Files scanned", value: snapshot?.filesScanned ?? 0 },
+    { label: "Lines scanned", value: snapshot?.linesScanned ?? 0 },
+    { label: "MCP tool calls", value: snapshot?.mcpToolCallsTotal ?? 0 },
+    { label: "Skill invocations", value: snapshot?.skillMentionsTotal ?? 0 },
+    { label: "Parse errors", value: snapshot?.parseErrors ?? 0 }
+  ]);
+  renderMcpList(mcpTopMcpEl, topMcpTools);
+  renderMcpList(mcpTopSkillsEl, topSkills);
+  renderMcpList(mcpFilesEl, topFiles);
+
+  const mcpHourly = hourlyRollup.map((row) => ({
+    label: formatHourLabel(row?.hour),
+    value: Number(row?.mcpToolCalls || 0)
+  }));
+  const skillHourly = hourlyRollup.map((row) => ({
+    label: formatHourLabel(row?.hour),
+    value: Number(row?.skillInvocations || 0)
+  }));
+  renderHourlyBars(mcpHourlyMcpEl, mcpHourly, "No MCP calls in selected window.");
+  renderHourlyBars(mcpHourlySkillsEl, skillHourly, "No skill invocations in selected window.");
+}
+
+function renderMcpList(container, entries) {
+  if (!container) {
+    return;
+  }
+  if (!Array.isArray(entries) || entries.length === 0) {
+    container.innerHTML = `<li class="mcp-list-empty">No data yet.</li>`;
+    return;
+  }
+  container.innerHTML = entries
+    .map((entry) => {
+      const label = escapeHtml(String(entry?.label || entry?.name || "-"));
+      const value = formatInteger(entry?.value ?? entry?.count ?? 0);
+      return `<li><span>${label}</span><strong>${value}</strong></li>`;
+    })
+    .join("");
+}
+
+function renderHourlyBars(container, rows, emptyMessage) {
+  if (!container) {
+    return;
+  }
+  const usableRows = Array.isArray(rows) ? rows : [];
+  const maxValue = usableRows.reduce((max, row) => Math.max(max, Number(row?.value || 0)), 0);
+  if (!usableRows.length || maxValue <= 0) {
+    container.innerHTML = `<p class="mcp-chart-empty">${escapeHtml(emptyMessage)}</p>`;
+    return;
+  }
+
+  container.innerHTML = usableRows
+    .map((row) => {
+      const value = Math.max(0, Number(row?.value || 0));
+      const width = Math.max(4, Math.round((value / maxValue) * 100));
+      return `
+        <div class="mcp-bar-row">
+          <span class="mcp-bar-label">${escapeHtml(String(row?.label || "-"))}</span>
+          <div class="mcp-bar-track"><span class="mcp-bar-fill" style="width:${width}%"></span></div>
+          <span class="mcp-bar-value">${formatInteger(value)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function formatHourLabel(isoTimestamp) {
+  if (!isoTimestamp) {
+    return "-";
+  }
+  const date = new Date(isoTimestamp);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric"
+  });
+}
+
+function maybeLoadUsageData() {
+  if (hasLoadedUsageOnce || usageLoadInFlight) {
+    return;
+  }
+  loadUsageData(false);
+}
+
+function setUsageStatus(message) {
+  if (usageStatusEl) {
+    usageStatusEl.textContent = message;
+  }
+}
+
+function setUsageLoadingState(isLoading) {
+  if (usageRefreshBtn) {
+    usageRefreshBtn.disabled = isLoading;
+  }
+}
+
+async function loadUsageData(forceRefresh) {
+  if (!window.monitor?.codexUsage || usageLoadInFlight) {
+    setUsageStatus("Usage status: local usage bridge unavailable");
+    return;
+  }
+
+  usageLoadInFlight = true;
+  setUsageLoadingState(true);
+  setUsageStatus(
+    forceRefresh
+      ? "Usage status: refreshing from local Codex data..."
+      : "Usage status: loading local Codex usage snapshot..."
+  );
+
+  try {
+    const snapshot = forceRefresh
+      ? await window.monitor.codexUsage.refresh()
+      : await window.monitor.codexUsage.get();
+    renderUsageSnapshot(snapshot);
+    hasLoadedUsageOnce = true;
+    updateLastRefresh("Usage");
+  } catch (error) {
+    setUsageStatus(`Usage status: ${errorMessage(error)}`);
+  } finally {
+    usageLoadInFlight = false;
+    setUsageLoadingState(false);
+  }
 }
 
 function getStoredGithubScanRoots() {
@@ -580,11 +627,12 @@ function getValidatedGithubScanRootsFromInput() {
   return roots;
 }
 
-async function runGithubScanFromInput() {
+async function runGithubScanFromInput(event) {
   if (!githubScanBtn || !window.monitor?.githubRepos || isGithubScanInFlight) {
     return;
   }
 
+  const forceRefresh = Boolean(event?.shiftKey);
   let roots = [];
   try {
     roots = getValidatedGithubScanRootsFromInput();
@@ -595,14 +643,18 @@ async function runGithubScanFromInput() {
 
   isGithubScanInFlight = true;
   githubScanBtn.disabled = true;
-  setGithubScanStatus("Git scan status: scanning local repositories...");
+  setGithubScanStatus(
+    forceRefresh
+      ? "Git scan status: forcing fresh local scan..."
+      : "Git scan status: checking cache / scanning..."
+  );
   setGithubScanSummary("Scan summary: running...");
 
   try {
-    const report = await window.monitor.githubRepos.scan({ roots });
+    const report = await window.monitor.githubRepos.scan({ roots, force: forceRefresh });
     persistGithubScanRoots(roots.join(", "));
     renderGithubScanResults(report);
-    setGithubScanStatus("Git scan status: completed");
+    setGithubScanStatus(`Git scan status: completed (${formatGithubScanCacheLabel(report?.cache)})`);
     updateLastRefresh("Git + Worktrees");
   } catch (error) {
     setGithubScanStatus(`Git scan status: ${errorMessage(error)}`);
@@ -613,308 +665,162 @@ async function runGithubScanFromInput() {
   }
 }
 
-function renderGithubScanResults(report) {
-  const repos = Array.isArray(report?.repos) ? report.repos : [];
-  const roots = Array.isArray(report?.roots) ? report.roots : [];
-  const candidateCount = Number.isFinite(report?.gitCandidateCount) ? report.gitCandidateCount : 0;
-  const generatedAt = report?.generatedAt ? formatDate(report.generatedAt) : "Unknown";
+function renderUsageSnapshot(snapshot) {
+  const status = String(snapshot?.status || "unknown").toLowerCase();
+  const summary = snapshot?.summary || {};
+  const byModel = Array.isArray(snapshot?.byModel) ? snapshot.byModel : [];
+  const byEffort = Array.isArray(snapshot?.byEffort) ? snapshot.byEffort : [];
+  const sessions = Array.isArray(snapshot?.sessions) ? snapshot.sessions : [];
+  const warnings = Array.isArray(snapshot?.warnings) ? snapshot.warnings : [];
+  const windowHours = Number(summary.windowHours || snapshot?.window?.hours || 24);
 
-  githubScanRepos = repos
-    .map((repo, index) => normalizeGithubRepo(repo, index))
-    .sort((left, right) => {
-      if (right.lastCommitUnix !== left.lastCommitUnix) {
-        return right.lastCommitUnix - left.lastCommitUnix;
-      }
-      return left.repoRoot.localeCompare(right.repoRoot);
-    });
-  githubScanPage = 1;
+  if (usageTotalSessionsEl) {
+    usageTotalSessionsEl.textContent = formatInteger(summary.totalSessions);
+  }
+  if (usageModelCountEl) {
+    usageModelCountEl.textContent = formatInteger(summary.modelsTracked);
+  }
+  if (usageTotalTokensEl) {
+    usageTotalTokensEl.textContent = formatInteger(summary.totalTokens);
+  }
+  if (usageEstimatedCostEl) {
+    usageEstimatedCostEl.textContent = formatCurrency(summary.estimatedCostUsd);
+  }
 
-  setGithubScanSummary(
-    `Scan summary: ${githubScanRepos.length} GitHub repos | ${candidateCount} git candidates | generated ${generatedAt}`
-  );
+  if (status === "error") {
+    setUsageStatus(`Usage status: ${warnings[0] || "failed to load usage snapshot"}`);
+  } else if (warnings.length > 0) {
+    setUsageStatus(`Usage status: loaded last ${windowHours}h with warnings (${warnings.length})`);
+  } else {
+    const generatedAt = formatDate(snapshot?.generatedAt);
+    setUsageStatus(
+      `Usage status: loaded ${formatInteger(sessions.length)} sessions in last ${windowHours}h (${generatedAt})`
+    );
+  }
 
-  renderGithubScanOverview({
-    roots,
-    candidateCount,
-    generatedAt,
-    repos: githubScanRepos
-  });
-  renderGithubScanPage();
+  renderUsageModelRows(byModel);
+  renderUsageEffortRows(byEffort);
+  renderUsageSessionRows(sessions);
 }
 
-function renderGithubScanOverview({ roots, candidateCount, generatedAt, repos }) {
-  if (!githubScanOverviewEl) {
+function renderUsageModelRows(rows) {
+  if (!usageModelTableBodyEl) {
     return;
   }
 
-  const rootCount = roots.length;
-  const worktreeCount = repos.reduce((sum, repo) => sum + repo.worktrees.length, 0);
-  const detachedCount = repos.reduce(
-    (sum, repo) => sum + repo.worktrees.filter((worktree) => worktree.detached).length,
-    0
-  );
-  const withRecentCommit = repos.filter((repo) => repo.lastCommitUnix > 0).length;
-
-  githubScanOverviewEl.innerHTML = `
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Scan Roots</span>
-      <strong>${formatCount(rootCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">GitHub Repos</span>
-      <strong>${formatCount(repos.length)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Worktrees</span>
-      <strong>${formatCount(worktreeCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Detached</span>
-      <strong>${formatCount(detachedCount)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Recent Commit Known</span>
-      <strong>${formatCount(withRecentCommit)}</strong>
-    </div>
-    <div class="git-overview-stat">
-      <span class="git-overview-label">Git Candidates</span>
-      <strong>${formatCount(candidateCount)}</strong>
-    </div>
-    <p class="git-overview-roots">
-      Roots: ${escapeHtml(roots.join(", ") || "(none)")} | Generated: ${escapeHtml(generatedAt)}
-    </p>
-  `;
-}
-
-function renderGithubScanPage() {
-  if (!githubScanResultsEl) {
+  if (!rows.length) {
+    usageModelTableBodyEl.innerHTML = `<tr><td colspan="5">No model usage rows found.</td></tr>`;
     return;
   }
 
-  if (githubScanRepos.length === 0) {
-    githubScanResultsEl.textContent = "No GitHub repos found for the provided roots.";
-    updateGithubPaginationControls(0, 0, 0);
-    return;
-  }
-
-  const pageSize = Math.max(1, githubScanPageSize);
-  const totalPages = Math.max(1, Math.ceil(githubScanRepos.length / pageSize));
-  githubScanPage = Math.min(totalPages, Math.max(1, githubScanPage));
-  const startIndex = (githubScanPage - 1) * pageSize;
-  const endIndex = Math.min(githubScanRepos.length, startIndex + pageSize);
-  const pageRepos = githubScanRepos.slice(startIndex, endIndex);
-  updateGithubPaginationControls(totalPages, startIndex + 1, endIndex);
-
-  githubScanResultsEl.innerHTML = pageRepos
-    .map((repo) => {
-      const worktrees = repo.worktrees;
-      const worktreeItems = worktrees
-        .map((worktree) => {
-          const branchLabel = worktree.branch || (worktree.detached ? "(detached)" : "(unknown)");
-          return `
-            <li class="git-worktree-row">
-              <code class="git-path">${escapeHtml(String(worktree.path || ""))}</code>
-              <span class="git-worktree-meta">
-                <span class="git-branch-pill">${escapeHtml(branchLabel)}</span>
-                <span>HEAD ${escapeHtml(shortSha(String(worktree.head || "unknown")))}</span>
-              </span>
-            </li>
-          `;
-        })
-        .join("");
-
+  const html = rows
+    .map((row) => {
       return `
-        <section class="git-repo-card">
-          <div class="git-repo-card-head">
-            <h4>${escapeHtml(String(repo.repoRoot || ""))}</h4>
-            <span class="git-last-seen">${escapeHtml(formatRepoRecency(repo.lastCommitUnix))}</span>
-          </div>
-          <div class="git-repo-facts">
-            <p class="git-repo-origin"><span>origin</span><code>${escapeHtml(
-              String(repo.origin || "(none)")
-            )}</code></p>
-            <p class="git-repo-origin"><span>branch</span><strong>${escapeHtml(
-              String(repo.currentBranch || "(detached/unknown)")
-            )}</strong></p>
-            <p class="git-repo-origin"><span>HEAD</span><code>${escapeHtml(
-              shortSha(String(repo.head || "unknown"))
-            )}</code></p>
-            <p class="git-repo-origin"><span>last commit</span><strong>${escapeHtml(
-              formatUnixDate(repo.lastCommitUnix)
-            )}</strong></p>
-            <p class="git-repo-origin"><span>worktrees</span><strong>${formatCount(worktrees.length)}</strong></p>
-          </div>
-          <ul class="git-worktree-list">${worktreeItems || "<li>No worktrees listed.</li>"}</ul>
-        </section>
+        <tr>
+          <td>${escapeHtml(row.model || "unknown")}</td>
+          <td>${formatInteger(row.sessions)}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatRate(row.rateUsdPer1MTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+        </tr>
       `;
     })
     .join("");
-}
-function setMcpStatus(message) {
-  if (mcpStatusEl) {
-    mcpStatusEl.textContent = message;
-  }
+  usageModelTableBodyEl.innerHTML = html;
 }
 
-function setMcpLastUpdated(isoTimestamp) {
-  if (!mcpLastUpdatedEl) {
-    return;
-  }
-  const date = new Date(isoTimestamp);
-  mcpLastUpdatedEl.textContent = Number.isNaN(date.getTime()) ? "unknown" : date.toLocaleString();
-}
-
-function getValidatedMcpDays() {
-  if (!mcpDaysInput) {
-    return MCP_DEFAULT_DAYS;
-  }
-  const parsed = Number.parseInt(String(mcpDaysInput.value || "").trim(), 10);
-  if (!Number.isFinite(parsed)) {
-    return MCP_DEFAULT_DAYS;
-  }
-  return Math.max(MCP_MIN_DAYS, Math.min(MCP_MAX_DAYS, parsed));
-}
-
-async function loadMcpSkillSnapshot(isAutoLoad) {
-  if (isMcpSnapshotInFlight) {
+function renderUsageSessionRows(rows) {
+  if (!usageSessionTableBodyEl) {
     return;
   }
 
-  if (!window.monitor?.mcpSkillTracking) {
-    setMcpStatus("MCP status: secure tracking bridge unavailable");
+  if (!rows.length) {
+    usageSessionTableBodyEl.innerHTML = `<tr><td colspan="6">No sessions found.</td></tr>`;
     return;
   }
 
-  const days = getValidatedMcpDays();
-  if (mcpDaysInput) {
-    mcpDaysInput.value = String(days);
-  }
-
-  isMcpSnapshotInFlight = true;
-  if (mcpRefreshBtn) {
-    mcpRefreshBtn.disabled = true;
-  }
-  if (mcpDaysInput) {
-    mcpDaysInput.disabled = true;
-  }
-  setMcpStatus(
-    isAutoLoad ? "MCP status: loading snapshot from local sessions..." : "MCP status: refreshing..."
-  );
-
-  try {
-    const snapshot = await window.monitor.mcpSkillTracking.getSnapshot({ days });
-    renderMcpSnapshot(snapshot);
-    setMcpStatus(`MCP status: scanned ${snapshot.filesScanned} file(s) over ${snapshot.windowDays} day(s)`);
-    setMcpLastUpdated(snapshot.generatedAt);
-    updateLastRefresh("MCP + Skills");
-  } catch (error) {
-    setMcpStatus(`MCP status: ${errorMessage(error)}`);
-  } finally {
-    isMcpSnapshotInFlight = false;
-    if (mcpRefreshBtn) {
-      mcpRefreshBtn.disabled = false;
-    }
-    if (mcpDaysInput) {
-      mcpDaysInput.disabled = false;
-    }
-  }
-}
-
-function renderMcpSnapshot(snapshot) {
-  if (!snapshot) {
-    return;
-  }
-
-  renderMcpList(mcpSummaryEl, [
-    { label: "Window", value: `${snapshot.windowDays} day(s)` },
-    { label: "Files scanned", value: snapshot.filesScanned },
-    { label: "Lines scanned", value: snapshot.linesScanned },
-    { label: "MCP tool calls", value: snapshot.mcpToolCallsTotal },
-    { label: "Skill invocations", value: snapshot.skillMentionsTotal },
-    { label: "Parse errors", value: snapshot.parseErrors }
-  ]);
-
-  renderMcpList(
-    mcpTopMcpEl,
-    Array.isArray(snapshot.topMcpTools)
-      ? snapshot.topMcpTools.map((item) => ({ label: item.name, value: item.count }))
-      : []
-  );
-
-  renderMcpList(
-    mcpTopSkillsEl,
-    Array.isArray(snapshot.topSkills)
-      ? snapshot.topSkills.map((item) => ({ label: item.name, value: item.count }))
-      : []
-  );
-
-  const warningRows = Array.isArray(snapshot.warnings)
-    ? snapshot.warnings.map((warning) => ({ label: "Warning", value: warning }))
-    : [];
-  const fileRows = Array.isArray(snapshot.recentFiles)
-    ? snapshot.recentFiles.map((filePath) => ({ label: "File", value: filePath }))
-    : [];
-  renderMcpList(mcpFilesEl, [...warningRows, ...fileRows]);
-}
-
-function renderMcpList(containerEl, items) {
-  if (!containerEl) {
-    return;
-  }
-
-  const listItems = Array.isArray(items) ? items : [];
-  if (!listItems.length) {
-    containerEl.innerHTML = `<div class="mcp-list-item"><span class="mcp-item-key">No data</span><span class="mcp-item-value">-</span></div>`;
-    return;
-  }
-
-  containerEl.innerHTML = listItems
-    .map((item) => {
-      const label = escapeHtml(item.label || "Item");
-      const value = escapeHtml(item.value ?? "");
-      return `<div class="mcp-list-item"><span class="mcp-item-key">${label}</span><span class="mcp-item-value">${value}</span></div>`;
+  const html = rows
+    .slice(0, 50)
+    .map((row) => {
+      const sessionId = String(row.id || "").slice(0, 8) || "unknown";
+      return `
+        <tr>
+          <td><span class="mono-text">${escapeHtml(sessionId)}</span></td>
+          <td>${escapeHtml(row.model || "unknown")}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+          <td>${escapeHtml(row.gitBranch || "-")}</td>
+          <td>${escapeHtml(formatDate(row.updatedAt))}</td>
+        </tr>
+      `;
     })
     .join("");
+  usageSessionTableBodyEl.innerHTML = html;
 }
 
-function updateGithubPaginationControls(totalPages, startIndex, endIndex) {
-  if (githubScanPageStatusEl) {
-    if (totalPages <= 0) {
-      githubScanPageStatusEl.textContent = "Page 0 of 0";
-    } else {
-      githubScanPageStatusEl.textContent = `Page ${githubScanPage} of ${totalPages} (${formatCount(
-        startIndex
-      )}-${formatCount(endIndex)} of ${formatCount(githubScanRepos.length)})`;
-    }
+function renderUsageEffortRows(rows) {
+  if (!usageEffortTableBodyEl) {
+    return;
   }
 
-  if (githubPrevPageBtn) {
-    githubPrevPageBtn.disabled = totalPages <= 1 || githubScanPage <= 1;
+  if (!rows.length) {
+    usageEffortTableBodyEl.innerHTML = `<tr><td colspan="4">No effort rows found.</td></tr>`;
+    return;
   }
-  if (githubNextPageBtn) {
-    githubNextPageBtn.disabled = totalPages <= 1 || githubScanPage >= totalPages;
-  }
+
+  const html = rows
+    .map((row) => {
+      return `
+        <tr>
+          <td>${escapeHtml(String(row.effort || "unknown").toUpperCase())}</td>
+          <td>${formatInteger(row.sessions)}</td>
+          <td>${formatInteger(row.totalTokens)}</td>
+          <td>${formatCurrency(row.estimatedCostUsd)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+  usageEffortTableBodyEl.innerHTML = html;
 }
 
-function normalizeGithubRepo(repo, index) {
-  const repoRoot = String(repo?.repoRoot || repo?.probePath || `repo-${index + 1}`);
-  const worktrees = Array.isArray(repo?.worktrees)
-    ? repo.worktrees.map((worktree) => ({
-        path: String(worktree?.path || ""),
-        head: String(worktree?.head || ""),
-        branch: String(worktree?.branch || ""),
-        detached: Boolean(worktree?.detached)
-      }))
-    : [];
+function formatInteger(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric < 0) {
+    return "0";
+  }
+  return Math.round(numeric).toLocaleString();
+}
 
-  return {
-    repoRoot,
-    origin: String(repo?.origin || ""),
-    currentBranch: String(repo?.currentBranch || ""),
-    head: String(repo?.head || ""),
-    lastCommitUnix: parsePositiveNumber(repo?.lastCommitUnix, 0),
-    worktrees
-  };
+function formatGithubScanCacheLabel(cache) {
+  if (!cache || typeof cache !== "object") {
+    return "fresh";
+  }
+
+  if (cache.hit) {
+    return `cached ${formatDurationShort(cache.ageMs)} ago`;
+  }
+
+  if (cache.source === "fresh-forced") {
+    return "fresh (forced)";
+  }
+  if (cache.source === "in-flight") {
+    return "shared in-flight";
+  }
+  return "fresh";
+}
+
+function formatDurationShort(valueMs) {
+  const totalSeconds = Math.max(0, Math.floor(Number(valueMs || 0) / 1000));
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  if (totalSeconds < 3600) {
+    return `${Math.floor(totalSeconds / 60)}m`;
+  }
+  if (totalSeconds < 86400) {
+    return `${Math.floor(totalSeconds / 3600)}h`;
+  }
+  return `${Math.floor(totalSeconds / 86400)}d`;
 }
 
 function parsePositiveNumber(value, fallback) {
@@ -925,37 +831,25 @@ function parsePositiveNumber(value, fallback) {
   return parsed;
 }
 
-function shortSha(value) {
-  const text = String(value || "");
-  if (!/^[0-9a-f]{7,40}$/i.test(text)) {
-    return text;
+function formatCurrency(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "$0.00";
   }
-  return text.slice(0, 10);
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(numeric);
 }
 
-function formatRepoRecency(unixTs) {
-  if (!unixTs) {
-    return "Last commit unknown";
+function formatRate(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "$0.00";
   }
-
-  const deltaSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixTs);
-  if (deltaSeconds < 60) {
-    return "Updated <1 min ago";
-  }
-  if (deltaSeconds < 3600) {
-    return `Updated ${Math.floor(deltaSeconds / 60)} min ago`;
-  }
-  if (deltaSeconds < 86400) {
-    return `Updated ${Math.floor(deltaSeconds / 3600)} hr ago`;
-  }
-  return `Updated ${Math.floor(deltaSeconds / 86400)} day ago`;
-}
-
-function formatUnixDate(unixTs) {
-  if (!unixTs) {
-    return "Unknown";
-  }
-  return new Date(unixTs * 1000).toLocaleString();
+  return `$${numeric.toFixed(2)}`;
 }
 
 async function loadLinearSettings() {
@@ -1247,9 +1141,21 @@ function renderGraphDetails(issue) {
           <span class="detail-value">${safeUpdated}</span>
         </div>
       </div>
-      <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      <div class="detail-action-row">
+        <button class="detail-deploy-btn" type="button" data-action="deploy-orchestrator">
+          Deploy Orchestrator
+        </button>
+        <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      </div>
     </article>
   `;
+
+  const deployBtn = graphDetailsEl.querySelector('[data-action="deploy-orchestrator"]');
+  if (deployBtn) {
+    deployBtn.addEventListener("click", () => {
+      void deployOrchestratorFromGraphIssue(issue);
+    });
+  }
 }
 
 function renderGraphDetailsMessage(message) {
@@ -1288,6 +1194,99 @@ function priorityLabel(priority) {
 
 function sanitizeLabel(value) {
   return String(value).replace(/"/g, "'").replace(/\n/g, " ");
+}
+
+function normalizeTaskToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildFallbackTaskId(issue) {
+  const fromIdentifier = normalizeTaskToken(issue?.identifier);
+  if (fromIdentifier) {
+    return fromIdentifier;
+  }
+  const fromTitle = normalizeTaskToken(issue?.title);
+  if (fromTitle) {
+    return fromTitle;
+  }
+  const fromIssueId = normalizeTaskToken(issue?.id);
+  if (fromIssueId) {
+    return `task-${fromIssueId}`;
+  }
+  return `task-${Date.now()}`;
+}
+
+function buildFallbackTaskTitle(issue) {
+  const titleToken = normalizeTaskToken(issue?.title);
+  if (titleToken) {
+    return titleToken;
+  }
+  const identifierToken = normalizeTaskToken(issue?.identifier);
+  if (identifierToken) {
+    return identifierToken;
+  }
+  return "orchestrator-task";
+}
+
+function buildTicketBriefFromIssue(issue) {
+  const identifier = String(issue?.identifier || "UNKNOWN").trim();
+  const title = String(issue?.title || "Untitled").trim();
+  const state = String(issue?.state?.name || "Unknown").trim();
+  const assignee = String(issue?.assignee?.name || "Unassigned").trim();
+  const priority = priorityLabel(issue?.priority);
+  const source = String(issue?.url || "n/a").trim();
+  return [
+    `Issue: ${identifier}`,
+    `Title: ${title}`,
+    `State: ${state}`,
+    `Priority: ${priority}`,
+    `Assignee: ${assignee}`,
+    `Source: ${source}`,
+    "Action: Run orchestrator deployment for this dependency-map issue."
+  ].join("\n");
+}
+
+function populateOrchestratorInputsFromIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  const taskId = buildFallbackTaskId(issue);
+  const taskTitle = buildFallbackTaskTitle(issue);
+  const ticketBrief = buildTicketBriefFromIssue(issue);
+  const linearIssue = String(issue.identifier || "").trim().toUpperCase();
+
+  if (agentTaskIdInput) {
+    agentTaskIdInput.value = taskId;
+  }
+  if (agentTaskTitleInput) {
+    agentTaskTitleInput.value = taskTitle;
+  }
+  if (agentTicketBriefInput) {
+    agentTicketBriefInput.value = ticketBrief;
+  }
+  if (agentLinearIssueInput && linearIssue) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.checked = true;
+  }
+  syncWatchModeUiState();
+}
+
+async function deployOrchestratorFromGraphIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  populateOrchestratorInputsFromIssue(issue);
+  setGraphStatus(`Graph status: deploying orchestrator for ${issue.identifier || "selected issue"}...`);
+  setActiveScreen("agents");
+  await startOrchestratorRunFromInputs();
 }
 
 function normalizeLinearColor(colorValue) {
@@ -1619,10 +1618,7 @@ function initializeGraphNavigationControls() {
     graphZoomOutBtn.addEventListener("click", () => setGraphZoom(graphZoomLevel - GRAPH_ZOOM_STEP));
   }
   if (graphZoomResetBtn) {
-    graphZoomResetBtn.addEventListener("click", () => {
-      setGraphZoom(graphDefaultZoomLevel);
-      centerGraphViewport();
-    });
+    graphZoomResetBtn.addEventListener("click", () => setGraphZoom(graphDefaultZoomLevel));
   }
 
   if (!graphOutputEl) {
@@ -1652,7 +1648,8 @@ function initializeGraphZoomForRenderedSvg() {
   graphDefaultZoomLevel = computeGraphFitZoom(baseSize, graphOutputEl);
   graphZoomLevel = graphDefaultZoomLevel;
   applyGraphZoom();
-  centerGraphViewport();
+  graphOutputEl.scrollTop = 0;
+  graphOutputEl.scrollLeft = 0;
 }
 
 function computeGraphBaseSize(svg) {
@@ -1712,20 +1709,6 @@ function applyGraphVisualPolish() {
     edgePath.setAttribute("stroke-linejoin", "round");
     edgePath.setAttribute("stroke-width", "2");
   });
-
-  graphOutputEl.querySelectorAll(".node .label foreignObject > div").forEach((labelDiv) => {
-    if (!(labelDiv instanceof HTMLElement)) {
-      return;
-    }
-    labelDiv.style.display = "flex";
-    labelDiv.style.alignItems = "center";
-    labelDiv.style.justifyContent = "center";
-    labelDiv.style.textAlign = "center";
-    labelDiv.style.whiteSpace = "normal";
-    labelDiv.style.width = "100%";
-    labelDiv.style.height = "100%";
-    labelDiv.style.lineHeight = "1.3";
-  });
 }
 
 function applyGraphZoom() {
@@ -1738,19 +1721,6 @@ function applyGraphZoom() {
   svg.style.width = `${Math.round(graphBaseSize.width * graphZoomLevel)}px`;
   svg.style.height = `${Math.round(graphBaseSize.height * graphZoomLevel)}px`;
   updateGraphZoomControls();
-}
-
-function centerGraphViewport() {
-  if (!graphOutputEl || !graphBaseSize.width || !graphBaseSize.height) {
-    return;
-  }
-
-  const scaledWidth = graphBaseSize.width * graphZoomLevel;
-  const scaledHeight = graphBaseSize.height * graphZoomLevel;
-  const targetScrollLeft = Math.max(0, (scaledWidth - graphOutputEl.clientWidth) / 2);
-  const targetScrollTop = Math.max(0, (scaledHeight - graphOutputEl.clientHeight) / 2);
-  graphOutputEl.scrollLeft = Math.round(targetScrollLeft);
-  graphOutputEl.scrollTop = Math.round(targetScrollTop);
 }
 
 function clampGraphZoom(nextZoom) {
@@ -1874,4 +1844,842 @@ function onGraphWheel(event) {
   const anchorY = event.clientY - rect.top;
   const scaleDirection = event.deltaY < 0 ? 1 + GRAPH_ZOOM_STEP : 1 - GRAPH_ZOOM_STEP;
   setGraphZoom(graphZoomLevel * scaleDirection, { anchorX, anchorY });
+}
+
+function initializeOrchestratorControls() {
+  if (!agentStatusEl || !agentRunMetaEl || !agentLogsEl || !agentTimelineEl) {
+    return;
+  }
+
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable in preload");
+    setAgentRunMetaMessage("Run metadata: unavailable");
+    updateOrchestratorButtons("idle");
+    return;
+  }
+
+  if (agentStartRunBtn) {
+    agentStartRunBtn.addEventListener("click", startOrchestratorRunFromInputs);
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.addEventListener("click", stopActiveOrchestratorRun);
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.addEventListener("change", syncWatchModeUiState);
+  }
+
+  if (!orchestratorEventUnsubscribe) {
+    orchestratorEventUnsubscribe = window.monitor.orchestrator.subscribe(handleOrchestratorEvent);
+  }
+
+  syncWatchModeUiState();
+  refreshOrchestratorStatus();
+}
+
+function syncWatchModeUiState() {
+  const watchEnabled = Boolean(agentWatchUntilDoneInput?.checked);
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.disabled = !watchEnabled;
+  }
+  if (agentPollSecondsInput) {
+    agentPollSecondsInput.disabled = !watchEnabled;
+  }
+}
+
+function setAgentStatusMessage(message) {
+  if (agentStatusEl) {
+    agentStatusEl.textContent = `Agent status: ${message}`;
+  }
+}
+
+function setAgentRunMetaMessage(message) {
+  if (agentRunMetaEl) {
+    agentRunMetaEl.textContent = message;
+  }
+}
+
+function formatTimelineTime(ts) {
+  const date = ts ? new Date(ts) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return "--:--:--";
+  }
+  return date.toLocaleTimeString();
+}
+
+function resetOrchestratorTimeline(runId = "") {
+  timelineRunId = String(runId || "");
+  orchestratorTimelineItems = [];
+  orchestratorTimelineKeys.clear();
+  renderOrchestratorTimeline();
+}
+
+function addOrchestratorTimelineEntry({ ts, label, key }) {
+  const text = String(label || "").trim();
+  if (!text) {
+    return;
+  }
+
+  const scopedKey = key ? `${timelineRunId || "global"}:${key}` : "";
+  if (scopedKey && orchestratorTimelineKeys.has(scopedKey)) {
+    return;
+  }
+
+  if (scopedKey) {
+    orchestratorTimelineKeys.add(scopedKey);
+  }
+
+  orchestratorTimelineItems.push({
+    ts: ts || new Date().toISOString(),
+    label: text,
+    key: scopedKey
+  });
+
+  if (orchestratorTimelineItems.length > ORCHESTRATOR_TIMELINE_MAX) {
+    const removed = orchestratorTimelineItems.splice(
+      0,
+      orchestratorTimelineItems.length - ORCHESTRATOR_TIMELINE_MAX
+    );
+    removed.forEach((entry) => {
+      if (entry.key) {
+        orchestratorTimelineKeys.delete(entry.key);
+      }
+    });
+  }
+
+  renderOrchestratorTimeline();
+}
+
+function renderOrchestratorTimeline() {
+  if (!agentTimelineEl) {
+    return;
+  }
+
+  if (!orchestratorTimelineItems.length) {
+    agentTimelineEl.innerHTML = `
+      <li class="agent-timeline-item is-placeholder">
+        <span class="agent-timeline-label">No timeline events yet.</span>
+      </li>
+    `;
+    return;
+  }
+
+  const items = orchestratorTimelineItems
+    .map((entry) => {
+      return `
+        <li class="agent-timeline-item">
+          <span class="agent-timeline-time">${escapeHtml(formatTimelineTime(entry.ts))}</span>
+          <span class="agent-timeline-label">${escapeHtml(entry.label)}</span>
+        </li>
+      `;
+    })
+    .join("");
+  agentTimelineEl.innerHTML = items;
+  agentTimelineEl.scrollTop = agentTimelineEl.scrollHeight;
+}
+
+function parseTimelineEventFromLogLine(text) {
+  const line = String(text || "").trim();
+  if (!line) {
+    return null;
+  }
+
+  if (/^==\s*PLAN AGENT\s*==$/i.test(line)) {
+    return { key: "phase-plan", label: "Plan phase started" };
+  }
+  if (/^==\s*IMPLEMENTATION AGENT\s*==$/i.test(line)) {
+    return { key: "phase-implementation", label: "Implementation phase started" };
+  }
+  if (/^==\s*TEST AGENT\s*==$/i.test(line)) {
+    return { key: "phase-test", label: "Test phase started" };
+  }
+  if (/^Complexity routing:/i.test(line)) {
+    return { key: "complexity-routing", label: line };
+  }
+  if (/^Phase sub-agent budgets:/i.test(line)) {
+    return { key: "phase-subagent-budgets", label: line };
+  }
+  if (/^Watch mode: issue .* currently /i.test(line)) {
+    return { key: "watch-active", label: line };
+  }
+  if (/^Watch mode: issue .* is completed/i.test(line)) {
+    return { key: "watch-completed", label: line };
+  }
+  if (/^PR URL:/i.test(line)) {
+    return { key: "pr-url", label: line };
+  }
+  if (/^Run artifacts:/i.test(line)) {
+    return { key: "run-artifacts", label: line };
+  }
+  if (/^Orchestration completed\.$/i.test(line)) {
+    return { key: "orchestration-completed", label: "Orchestration completed" };
+  }
+  if (/^Orchestration failed:/i.test(line)) {
+    return { key: "orchestration-failed", label: line };
+  }
+
+  return null;
+}
+
+function appendTimelineFromLog(ts, text) {
+  const timelineEvent = parseTimelineEventFromLogLine(text);
+  if (!timelineEvent) {
+    return;
+  }
+
+  addOrchestratorTimelineEntry({
+    ts,
+    key: timelineEvent.key,
+    label: timelineEvent.label
+  });
+}
+
+function syncTimelineFromRunLogs(runLogs) {
+  if (!Array.isArray(runLogs)) {
+    return;
+  }
+
+  runLogs.forEach((entry) => {
+    appendTimelineFromLog(entry?.ts, entry?.text);
+  });
+}
+
+function appendTimelineForRunState(run) {
+  const runId = String(run?.runId || "");
+  if (!runId) {
+    return;
+  }
+  const state = String(run?.state || "").toLowerCase();
+  if (!state) {
+    return;
+  }
+
+  const labelByState = {
+    starting: "Run started",
+    running: "Run running",
+    stopping: "Stop requested",
+    completed: "Run completed",
+    failed: run?.error ? `Run failed: ${run.error}` : "Run failed",
+    stopped: "Run stopped"
+  };
+  const label = labelByState[state];
+  if (!label) {
+    return;
+  }
+
+  const eventTs =
+    state === "starting"
+      ? run.startedAt || new Date().toISOString()
+      : state === "completed" || state === "failed" || state === "stopped"
+        ? run.endedAt || new Date().toISOString()
+        : new Date().toISOString();
+
+  addOrchestratorTimelineEntry({
+    ts: eventTs,
+    key: `state-${state}`,
+    label
+  });
+}
+
+function parsePollSeconds() {
+  const raw = String(agentPollSecondsInput?.value || "").trim();
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 5) {
+    return 30;
+  }
+  return parsed;
+}
+
+function validateOrchestratorInputs() {
+  const taskId = String(agentTaskIdInput?.value || "").trim();
+  const taskTitle = String(agentTaskTitleInput?.value || "").trim();
+  const ticketBrief = String(agentTicketBriefInput?.value || "").trim();
+  const watchUntilDone = Boolean(agentWatchUntilDoneInput?.checked);
+  const linearIssue = String(agentLinearIssueInput?.value || "").trim().toUpperCase();
+  const dryRun = Boolean(agentDryRunInput?.checked);
+  const allowDirty = Boolean(agentAllowDirtyInput?.checked);
+  const pollSeconds = parsePollSeconds();
+
+  if (!taskId) {
+    throw new Error("enter a task ID");
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(taskId)) {
+    throw new Error("task ID format is invalid");
+  }
+  if (!taskTitle) {
+    throw new Error("enter a task title");
+  }
+  if (!ticketBrief) {
+    throw new Error("enter a ticket brief");
+  }
+  if (watchUntilDone && !linearIssue) {
+    throw new Error("enter a Linear issue when watch mode is enabled");
+  }
+
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+
+  return {
+    taskId,
+    taskTitle,
+    ticketBrief,
+    linearIssue,
+    watchUntilDone,
+    pollSeconds,
+    dryRun,
+    allowDirty
+  };
+}
+
+async function startOrchestratorRunFromInputs() {
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable");
+    return;
+  }
+
+  try {
+    const payload = validateOrchestratorInputs();
+    setAgentStatusMessage("starting run...");
+    setAgentRunMetaMessage("Run metadata: launching orchestrator");
+    updateOrchestratorButtons("starting");
+    resetOrchestratorTimeline("");
+    addOrchestratorTimelineEntry({
+      ts: new Date().toISOString(),
+      key: `launch-request-${Date.now()}`,
+      label: `Run launch requested for ${payload.taskId}`
+    });
+    orchestratorLogLines = [];
+    renderOrchestratorLogs();
+
+    const result = await window.monitor.orchestrator.start(payload);
+    const run = result?.run;
+    if (!run) {
+      throw new Error("orchestrator did not return run metadata");
+    }
+    applyOrchestratorRunSnapshot(run);
+    updateLastRefresh("Agents");
+  } catch (error) {
+    setAgentStatusMessage(errorMessage(error));
+    updateOrchestratorButtons("idle");
+  }
+}
+
+async function stopActiveOrchestratorRun() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  if (!activeOrchestratorRunId) {
+    setAgentStatusMessage("no active run to stop");
+    return;
+  }
+
+  try {
+    setAgentStatusMessage("stopping run...");
+    addOrchestratorTimelineEntry({
+      ts: new Date().toISOString(),
+      key: `operator-stop-${activeOrchestratorRunId}`,
+      label: "Operator requested stop"
+    });
+    updateOrchestratorButtons("stopping");
+    const result = await window.monitor.orchestrator.stop(activeOrchestratorRunId);
+    const run = result?.run;
+    if (run) {
+      applyOrchestratorRunSnapshot(run);
+    }
+  } catch (error) {
+    setAgentStatusMessage(`stop failed: ${errorMessage(error)}`);
+  }
+}
+
+async function refreshOrchestratorStatus() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  try {
+    const status = await window.monitor.orchestrator.status(activeOrchestratorRunId || undefined);
+    if (status?.activeRun) {
+      applyOrchestratorRunSnapshot(status.activeRun);
+      return;
+    }
+    const mostRecent = Array.isArray(status?.recentRuns) ? status.recentRuns[0] : null;
+    if (mostRecent) {
+      applyOrchestratorRunSnapshot(mostRecent);
+      return;
+    }
+    activeOrchestratorRunId = "";
+    setAgentStatusMessage("idle");
+    setAgentRunMetaMessage("Run metadata: none");
+    resetOrchestratorTimeline("");
+    updateOrchestratorButtons("idle");
+  } catch (error) {
+    setAgentStatusMessage(`status load failed: ${errorMessage(error)}`);
+    updateOrchestratorButtons("idle");
+  }
+}
+
+function applyOrchestratorRunSnapshot(run) {
+  if (!run) {
+    return;
+  }
+
+  activeOrchestratorRunId = String(run.runId || "");
+  if (activeOrchestratorRunId && activeOrchestratorRunId !== timelineRunId) {
+    resetOrchestratorTimeline(activeOrchestratorRunId);
+    addOrchestratorTimelineEntry({
+      ts: run.startedAt || new Date().toISOString(),
+      key: `run-selected-${activeOrchestratorRunId}`,
+      label: `Tracking run ${run.taskId || activeOrchestratorRunId}`
+    });
+  }
+
+  const state = String(run.state || "unknown");
+  const runLabel = run.taskId ? `${run.taskId} (${activeOrchestratorRunId})` : activeOrchestratorRunId;
+  const errorText = run.error ? ` | error: ${run.error}` : "";
+  setAgentStatusMessage(`${state}${errorText}`);
+
+  const metadata = [
+    `Run metadata: ${runLabel || "n/a"}`,
+    `state=${state}`,
+    run.linearIssue ? `linear=${run.linearIssue}` : "linear=none",
+    run.watchUntilDone ? `watch=true@${run.pollSeconds || 30}s` : "watch=false",
+    run.runArtifactsPath ? `artifacts=${run.runArtifactsPath}` : "artifacts=pending",
+    run.prUrl ? `pr=${run.prUrl}` : "pr=none"
+  ].join(" | ");
+  setAgentRunMetaMessage(metadata);
+
+  if (Array.isArray(run.logs)) {
+    orchestratorLogLines = run.logs
+      .map((entry) => formatOrchestratorLogLine(entry?.ts, entry?.stream, entry?.text))
+      .filter(Boolean)
+      .slice(-ORCHESTRATOR_LOG_MAX);
+    renderOrchestratorLogs();
+    syncTimelineFromRunLogs(run.logs);
+  }
+
+  appendTimelineForRunState(run);
+  updateOrchestratorButtons(state);
+}
+
+function handleOrchestratorEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+
+  if (event.type === "state") {
+    const run = event.run;
+    if (!run) {
+      return;
+    }
+    if (activeOrchestratorRunId && run.runId !== activeOrchestratorRunId && !isRunTerminal(run.state)) {
+      return;
+    }
+    applyOrchestratorRunSnapshot(run);
+    return;
+  }
+
+  if (event.type === "log") {
+    if (!event.runId) {
+      return;
+    }
+    if (activeOrchestratorRunId && event.runId !== activeOrchestratorRunId) {
+      return;
+    }
+    if (!activeOrchestratorRunId) {
+      activeOrchestratorRunId = event.runId;
+    }
+    if (!timelineRunId) {
+      timelineRunId = event.runId;
+    }
+    appendOrchestratorLogLine(event.ts, event.stream, event.text);
+    appendTimelineFromLog(event.ts, event.text);
+  }
+}
+
+function isRunTerminal(state) {
+  return state === "completed" || state === "failed" || state === "stopped";
+}
+
+function updateOrchestratorButtons(state) {
+  const isActive = ORCHESTRATOR_ACTIVE_STATES.has(state);
+  if (agentStartRunBtn) {
+    agentStartRunBtn.disabled = isActive;
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.disabled = !isActive || !activeOrchestratorRunId;
+  }
+}
+
+function formatOrchestratorLogLine(ts, stream, text) {
+  const timestamp = ts ? new Date(ts) : null;
+  const prefix = timestamp && !Number.isNaN(timestamp.getTime()) ? timestamp.toLocaleTimeString() : "--:--:--";
+  const streamLabel = String(stream || "log").toLowerCase();
+  const line = String(text || "").trim();
+  if (!line) {
+    return "";
+  }
+  return `[${prefix}] ${streamLabel}: ${line}`;
+}
+
+function appendOrchestratorLogLine(ts, stream, text) {
+  const line = formatOrchestratorLogLine(ts, stream, text);
+  if (!line) {
+    return;
+  }
+  orchestratorLogLines.push(line);
+  if (orchestratorLogLines.length > ORCHESTRATOR_LOG_MAX) {
+    orchestratorLogLines.splice(0, orchestratorLogLines.length - ORCHESTRATOR_LOG_MAX);
+  }
+  renderOrchestratorLogs();
+}
+
+function renderOrchestratorLogs() {
+  if (!agentLogsEl) {
+    return;
+  }
+  if (!orchestratorLogLines.length) {
+    agentLogsEl.textContent = "No orchestrator output yet.";
+    return;
+  }
+  agentLogsEl.textContent = orchestratorLogLines.join("\\n");
+  agentLogsEl.scrollTop = agentLogsEl.scrollHeight;
+}
+
+function initializeManagedServerControls() {
+  if (!managedServerStatusEl || !managedServerListEl || !managedServerLogsEl) {
+    return;
+  }
+
+  if (!window.monitor?.managedServers) {
+    setManagedServerStatusMessage("runtime unavailable in preload");
+    return;
+  }
+
+  if (managedServerSaveBtn) {
+    managedServerSaveBtn.addEventListener("click", () => {
+      void saveManagedServerFromInputs();
+    });
+  }
+  if (managedServerClearBtn) {
+    managedServerClearBtn.addEventListener("click", clearManagedServerForm);
+  }
+  managedServerListEl.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const action = target.dataset.action;
+    const serverId = target.dataset.serverId;
+    if (!action || !serverId) {
+      return;
+    }
+    void handleManagedServerAction(action, serverId);
+  });
+
+  if (!managedServerEventUnsubscribe) {
+    managedServerEventUnsubscribe = window.monitor.managedServers.subscribe(handleManagedServerEvent);
+  }
+
+  void refreshManagedServers();
+}
+
+function setManagedServerStatusMessage(message) {
+  if (managedServerStatusEl) {
+    managedServerStatusEl.textContent = `Managed servers: ${message}`;
+  }
+}
+
+function clearManagedServerForm() {
+  if (managedServerIdInput) {
+    managedServerIdInput.value = "";
+  }
+  if (managedServerNameInput) {
+    managedServerNameInput.value = "";
+  }
+  if (managedServerCommandInput) {
+    managedServerCommandInput.value = "";
+  }
+  if (managedServerArgsInput) {
+    managedServerArgsInput.value = "";
+  }
+  if (managedServerCwdInput) {
+    managedServerCwdInput.value = "";
+  }
+}
+
+function validateManagedServerInputs() {
+  const id = String(managedServerIdInput?.value || "").trim();
+  const name = String(managedServerNameInput?.value || "").trim();
+  const command = String(managedServerCommandInput?.value || "").trim();
+  const argsText = String(managedServerArgsInput?.value || "").trim();
+  const cwd = String(managedServerCwdInput?.value || "").trim();
+
+  if (!name) {
+    throw new Error("enter a server name");
+  }
+  if (!command) {
+    throw new Error("enter a server command");
+  }
+
+  return {
+    id,
+    name,
+    command,
+    argsText,
+    cwd
+  };
+}
+
+async function saveManagedServerFromInputs() {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+  try {
+    const payload = validateManagedServerInputs();
+    if (managedServerSaveBtn) {
+      managedServerSaveBtn.disabled = true;
+    }
+    const isUpdate = Boolean(payload.id);
+    const result = isUpdate
+      ? await window.monitor.managedServers.update(payload)
+      : await window.monitor.managedServers.create(payload);
+    applyManagedServerList(result?.servers || []);
+    const targetId = result?.server?.id || payload.id;
+    if (targetId) {
+      selectedManagedServerId = targetId;
+      renderManagedServerLogs();
+    }
+    setManagedServerStatusMessage(isUpdate ? "server updated" : "server created");
+    updateLastRefresh("Managed servers");
+    clearManagedServerForm();
+  } catch (error) {
+    setManagedServerStatusMessage(errorMessage(error));
+  } finally {
+    if (managedServerSaveBtn) {
+      managedServerSaveBtn.disabled = false;
+    }
+  }
+}
+
+async function handleManagedServerAction(action, serverId) {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+
+  try {
+    if (action === "select") {
+      selectedManagedServerId = serverId;
+      renderManagedServerList();
+      renderManagedServerLogs();
+      return;
+    }
+
+    if (action === "edit") {
+      const server = managedServersById.get(serverId);
+      if (!server) {
+        return;
+      }
+      if (managedServerIdInput) {
+        managedServerIdInput.value = server.id;
+      }
+      if (managedServerNameInput) {
+        managedServerNameInput.value = server.name;
+      }
+      if (managedServerCommandInput) {
+        managedServerCommandInput.value = server.command;
+      }
+      if (managedServerArgsInput) {
+        managedServerArgsInput.value = server.argsText || "";
+      }
+      if (managedServerCwdInput) {
+        managedServerCwdInput.value = server.cwd || "";
+      }
+      setManagedServerStatusMessage(`editing ${server.name}`);
+      return;
+    }
+
+    let result = null;
+    if (action === "start") {
+      result = await window.monitor.managedServers.start(serverId);
+      setManagedServerStatusMessage("server starting");
+    } else if (action === "stop") {
+      result = await window.monitor.managedServers.stop(serverId);
+      setManagedServerStatusMessage("server stopping");
+    } else if (action === "remove") {
+      const server = managedServersById.get(serverId);
+      const label = server?.name || serverId;
+      if (!window.confirm(`Remove managed server "${label}"?`)) {
+        return;
+      }
+      result = await window.monitor.managedServers.remove(serverId);
+      if (selectedManagedServerId === serverId) {
+        selectedManagedServerId = "";
+      }
+      setManagedServerStatusMessage("server removed");
+    } else {
+      return;
+    }
+
+    applyManagedServerList(result?.servers || []);
+    renderManagedServerLogs();
+    updateLastRefresh("Managed servers");
+  } catch (error) {
+    setManagedServerStatusMessage(errorMessage(error));
+  }
+}
+
+async function refreshManagedServers() {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+  try {
+    const result = await window.monitor.managedServers.list();
+    applyManagedServerList(result?.servers || []);
+    if (result?.server?.id) {
+      selectedManagedServerId = result.server.id;
+    }
+    renderManagedServerLogs();
+    setManagedServerStatusMessage("ready");
+  } catch (error) {
+    setManagedServerStatusMessage(`load failed: ${errorMessage(error)}`);
+  }
+}
+
+function applyManagedServerState(server) {
+  if (!server || !server.id) {
+    return;
+  }
+  managedServersById.set(server.id, server);
+  if (!selectedManagedServerId) {
+    selectedManagedServerId = server.id;
+  }
+  renderManagedServerList();
+  if (selectedManagedServerId === server.id) {
+    renderManagedServerLogs();
+  }
+}
+
+function applyManagedServerList(servers) {
+  managedServersById = new Map();
+  (Array.isArray(servers) ? servers : []).forEach((server) => {
+    if (server?.id) {
+      managedServersById.set(server.id, server);
+    }
+  });
+  if (selectedManagedServerId && !managedServersById.has(selectedManagedServerId)) {
+    selectedManagedServerId = "";
+  }
+  if (!selectedManagedServerId && managedServersById.size > 0) {
+    selectedManagedServerId = Array.from(managedServersById.keys())[0];
+  }
+  renderManagedServerList();
+}
+
+function handleManagedServerEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+  if (event.type === "removed") {
+    const removedId = String(event.serverId || "");
+    if (removedId) {
+      managedServersById.delete(removedId);
+      if (selectedManagedServerId === removedId) {
+        selectedManagedServerId = "";
+      }
+      renderManagedServerList();
+      renderManagedServerLogs();
+    }
+    return;
+  }
+
+  if (event.type === "state" && event.server) {
+    applyManagedServerState(event.server);
+  }
+
+  if (event.type === "log" && event.serverId) {
+    const server = managedServersById.get(event.serverId);
+    if (!server) {
+      return;
+    }
+    const nextLogs = Array.isArray(server.logs) ? [...server.logs] : [];
+    nextLogs.push({
+      ts: event.ts,
+      stream: event.stream,
+      text: event.text
+    });
+    server.logs = nextLogs.slice(-300);
+    managedServersById.set(server.id, server);
+    if (selectedManagedServerId === server.id) {
+      renderManagedServerLogs();
+    }
+  }
+}
+
+function renderManagedServerList() {
+  if (!managedServerListEl) {
+    return;
+  }
+  const servers = Array.from(managedServersById.values()).sort((left, right) =>
+    String(left.name || "").localeCompare(String(right.name || ""))
+  );
+  if (!servers.length) {
+    managedServerListEl.innerHTML = '<p class="graph-details-placeholder">No managed servers yet.</p>';
+    return;
+  }
+
+  managedServerListEl.innerHTML = servers
+    .map((server) => {
+      const isSelected = server.id === selectedManagedServerId;
+      const rawStatus = String(server.status || "unknown").toLowerCase();
+      const statusClass = rawStatus.replace(/[^a-z0-9-]/g, "-");
+      const status = escapeHtml(rawStatus);
+      const name = escapeHtml(server.name || server.id);
+      const command = escapeHtml(server.command || "");
+      const argsText = escapeHtml(server.argsText || "");
+      const pidText = Number.isInteger(server.pid) ? String(server.pid) : "n/a";
+      const runText = server.lastRunAt ? escapeHtml(formatDate(server.lastRunAt)) : "never";
+      const canStart = server.status !== "running" && server.status !== "starting";
+      const canStop = server.status === "running" || server.status === "starting" || server.status === "stopping";
+
+      return `
+        <article class="managed-server-item ${isSelected ? "is-selected" : ""}">
+          <div class="managed-server-head">
+            <button type="button" data-action="select" data-server-id="${escapeAttribute(server.id)}">${name}</button>
+            <span class="managed-server-pill state-${statusClass}">${status}</span>
+          </div>
+          <p class="managed-server-command"><code>${command}${argsText ? ` ${argsText}` : ""}</code></p>
+          <p class="managed-server-meta">pid=${pidText} | last run=${runText}</p>
+          <div class="managed-server-actions">
+            <button type="button" data-action="start" data-server-id="${escapeAttribute(server.id)}" ${canStart ? "" : "disabled"}>Start</button>
+            <button type="button" data-action="stop" data-server-id="${escapeAttribute(server.id)}" ${canStop ? "" : "disabled"}>Stop</button>
+            <button type="button" data-action="edit" data-server-id="${escapeAttribute(server.id)}">Edit</button>
+            <button type="button" data-action="remove" data-server-id="${escapeAttribute(server.id)}">Remove</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderManagedServerLogs() {
+  if (!managedServerLogsEl) {
+    return;
+  }
+  if (!selectedManagedServerId) {
+    managedServerLogsEl.textContent = "Select a server to view logs.";
+    return;
+  }
+  const server = managedServersById.get(selectedManagedServerId);
+  if (!server) {
+    managedServerLogsEl.textContent = "Select a server to view logs.";
+    return;
+  }
+  const logs = Array.isArray(server.logs) ? server.logs : [];
+  if (!logs.length) {
+    managedServerLogsEl.textContent = `No logs yet for ${server.name}.`;
+    return;
+  }
+  managedServerLogsEl.textContent = logs
+    .map((entry) => formatOrchestratorLogLine(entry?.ts, entry?.stream, entry?.text))
+    .join("\n");
+  managedServerLogsEl.scrollTop = managedServerLogsEl.scrollHeight;
 }
