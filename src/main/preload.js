@@ -8,5 +8,9 @@ contextBridge.exposeInMainWorld("monitor", {
   themeSettings: {
     get: () => ipcRenderer.invoke("theme-settings:get"),
     save: (settings) => ipcRenderer.invoke("theme-settings:save", settings)
+  },
+  monitorData: {
+    getDashboard: () => ipcRenderer.invoke("monitor-data:get-dashboard"),
+    runIngestion: () => ipcRenderer.invoke("monitor-data:run-ingestion")
   }
 });

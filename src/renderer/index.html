@@ -48,10 +48,30 @@
         <main class="screen-panel is-active" data-screen-panel="overview">
           <div class="card">
             <h3>Overview</h3>
-            <p>
-              Use the left navigation to switch monitor views. This app shell keeps navigation and
-              header status shared across screens.
-            </p>
+            <p>App DB + ingestion core status for local Codex telemetry.</p>
+            <div class="row">
+              <button id="monitor-run-ingestion" type="button">Run Ingestion</button>
+            </div>
+            <p id="monitor-ingest-status">Ingestion status: idle</p>
+            <div class="overview-metrics">
+              <div class="metric-card">
+                <span class="metric-label">Total Events</span>
+                <strong id="metric-total-events">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Events (24h)</span>
+                <strong id="metric-events-24h">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Sessions</span>
+                <strong id="metric-sessions">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Last Event</span>
+                <strong id="metric-last-event">never</strong>
+              </div>
+            </div>
+            <p id="metric-source-breakdown" class="metric-subtext">Sources: n/a</p>
           </div>
         </main>
 
@@ -107,7 +127,8 @@
         <main class="screen-panel" data-screen-panel="usage">
           <div class="card">
             <h3>Usage</h3>
-            <p>Usage dashboard placeholder, including timeline and credits/context signals.</p>
+            <p>Model token/cost rollups from ingested local telemetry (last 24h).</p>
+            <div id="usage-rollups" class="usage-rollups">No usage data yet.</div>
           </div>
         </main>
 
@@ -120,7 +141,10 @@
         </main>
 
         <main class="screen-panel" data-screen-panel="health">
-          <div class="card"><h3>Health</h3><p>Health panel placeholder.</p></div>
+          <div class="card">
+            <h3>Health</h3>
+            <div id="health-summary" class="health-summary">No health data yet.</div>
+          </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="settings">

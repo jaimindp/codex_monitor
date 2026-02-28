@@ -15,6 +15,15 @@ const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
+const monitorRunIngestionBtn = document.getElementById("monitor-run-ingestion");
+const monitorIngestStatusEl = document.getElementById("monitor-ingest-status");
+const metricTotalEventsEl = document.getElementById("metric-total-events");
+const metricEvents24hEl = document.getElementById("metric-events-24h");
+const metricSessionsEl = document.getElementById("metric-sessions");
+const metricLastEventEl = document.getElementById("metric-last-event");
+const metricSourceBreakdownEl = document.getElementById("metric-source-breakdown");
+const usageRollupsEl = document.getElementById("usage-rollups");
+const healthSummaryEl = document.getElementById("health-summary");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const themeToggleGlyph = document.getElementById("theme-toggle-glyph");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
@@ -104,6 +113,7 @@ initializeThemeControls();
 initializeGraphNavigationControls();
 setGraphStatus("Graph status: waiting for Linear data");
 renderGraphDetailsMessage("Load Linear Issues to render the dependency graph.");
+initializeMonitorData();
 
 if (graphLoadMockBtn) {
   graphLoadMockBtn.addEventListener("click", async () => {
@@ -238,6 +248,145 @@ function setSettingsStatus(message) {
   if (settingsStatusEl) {
     settingsStatusEl.textContent = message;
   }
+}
+
+function setMonitorIngestStatus(message) {
+  if (monitorIngestStatusEl) {
+    monitorIngestStatusEl.textContent = message;
+  }
+}
+
+async function initializeMonitorData() {
+  if (!window.monitor?.monitorData) {
+    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
+    return;
+  }
+
+  if (monitorRunIngestionBtn) {
+    monitorRunIngestionBtn.addEventListener("click", runManualIngestion);
+  }
+
+  await refreshDashboardFromDb();
+}
+
+async function runManualIngestion() {
+  if (!window.monitor?.monitorData) {
+    setMonitorIngestStatus("Ingestion status: monitor data API unavailable");
+    return;
+  }
+
+  if (monitorRunIngestionBtn) {
+    monitorRunIngestionBtn.disabled = true;
+  }
+  setMonitorIngestStatus("Ingestion status: running...");
+
+  try {
+    const result = await window.monitor.monitorData.runIngestion();
+    setMonitorIngestStatus(
+      `Ingestion status: ${result.eventsInserted} new events, ${result.linesScanned} lines scanned (${result.durationMs} ms)`
+    );
+    await refreshDashboardFromDb();
+    updateLastRefresh("Overview");
+  } catch (error) {
+    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
+  } finally {
+    if (monitorRunIngestionBtn) {
+      monitorRunIngestionBtn.disabled = false;
+    }
+  }
+}
+
+async function refreshDashboardFromDb() {
+  if (!window.monitor?.monitorData) {
+    return;
+  }
+
+  try {
+    const dashboard = await window.monitor.monitorData.getDashboard();
+    if (!dashboard) {
+      return;
+    }
+    renderOverviewMetrics(dashboard.overview);
+    renderUsageRollups(dashboard.usage);
+    renderHealthSummary(dashboard.health);
+    setMonitorIngestStatus(
+      `Ingestion status: loaded ${formatInteger(dashboard.overview?.totalEvents || 0)} events from app DB`
+    );
+  } catch (error) {
+    setMonitorIngestStatus(`Ingestion status: ${errorMessage(error)}`);
+  }
+}
+
+function renderOverviewMetrics(overview) {
+  if (!overview) {
+    return;
+  }
+
+  if (metricTotalEventsEl) {
+    metricTotalEventsEl.textContent = formatInteger(overview.totalEvents);
+  }
+  if (metricEvents24hEl) {
+    metricEvents24hEl.textContent = formatInteger(overview.events24h);
+  }
+  if (metricSessionsEl) {
+    metricSessionsEl.textContent = formatInteger(overview.distinctSessions);
+  }
+  if (metricLastEventEl) {
+    metricLastEventEl.textContent = overview.lastEventTs
+      ? formatDate(new Date(overview.lastEventTs * 1000).toISOString())
+      : "never";
+  }
+  if (metricSourceBreakdownEl) {
+    if (!Array.isArray(overview.sources) || overview.sources.length === 0) {
+      metricSourceBreakdownEl.textContent = "Sources: none";
+    } else {
+      const sourceSummary = overview.sources
+        .map((item) => `${item.source}: ${formatInteger(item.count)}`)
+        .join(" | ");
+      metricSourceBreakdownEl.textContent = `Sources: ${sourceSummary}`;
+    }
+  }
+}
+
+function renderUsageRollups(usageRows) {
+  if (!usageRollupsEl) {
+    return;
+  }
+
+  if (!Array.isArray(usageRows) || usageRows.length === 0) {
+    usageRollupsEl.textContent = "No usage data yet.";
+    return;
+  }
+
+  usageRollupsEl.innerHTML = usageRows
+    .map(
+      (row) =>
+        `<div class=\"usage-row\"><strong>${escapeHtml(row.model)}</strong><span>${formatInteger(
+          row.totalTokens
+        )} tokens</span><span>$${Number(row.estimatedCostUsd || 0).toFixed(4)}</span></div>`
+    )
+    .join("");
+}
+
+function renderHealthSummary(health) {
+  if (!healthSummaryEl || !health) {
+    return;
+  }
+
+  const lastIngestLabel = health.lastIngestAt
+    ? formatDate(new Date(health.lastIngestAt * 1000).toISOString())
+    : "never";
+
+  healthSummaryEl.innerHTML = `
+    <div class="health-row"><span>Codex home</span><strong>${escapeHtml(health.codexHome || "n/a")}</strong></div>
+    <div class="health-row"><span>History file</span><strong>${health.historyPresent ? "present" : "missing"}</strong></div>
+    <div class="health-row"><span>Last ingest source</span><strong>${escapeHtml(health.lastIngestSource || "n/a")}</strong></div>
+    <div class="health-row"><span>Last ingest time</span><strong>${escapeHtml(lastIngestLabel)}</strong></div>
+  `;
+}
+
+function formatInteger(value) {
+  return Number(value || 0).toLocaleString();
 }
 
 function updateLastRefresh(sourceName) {

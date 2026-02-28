@@ -2,6 +2,7 @@
 
 Electron monitor UI that can start/stop `codex app-server` and stream logs.
 It includes a unified Mermaid-based Build Chart view for Linear dependency relationships.
+It now includes a local SQLite-backed ingestion core for Codex JSONL telemetry.
 
 ## App shell + shared navigation
 
@@ -102,3 +103,20 @@ CODEX_BIN=/absolute/path/to/codex npm run start
 Notes:
 - Mermaid is loaded from CDN (`jsdelivr`) at runtime.
 - This implementation calls Linear GraphQL directly from renderer process for MVP speed.
+
+## App DB + ingestion core (`hack-10`)
+
+- Main process now owns a local SQLite database at:
+  - `<electron userData>/monitor.sqlite`
+- Ingestion sources:
+  - `~/.codex/history.jsonl`
+  - `~/.codex/sessions/**/*.jsonl`
+- Ingestion is idempotent using deterministic event IDs from file path + line + payload hash.
+- Renderer reads dashboard summaries over IPC only (`preload.js` bridge), with no direct file/DB access.
+- Overview panel includes:
+  - Manual `Run Ingestion`
+  - Event/session counts and source breakdown
+- Usage panel includes:
+  - 24h token/cost rollups by model
+- Health panel includes:
+  - Codex home detection and last-ingest metadata
