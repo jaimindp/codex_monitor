@@ -106,7 +106,7 @@ graph TD
   class H34 inprog;
   class H25 inprog;
   class H35 inprog;
-  class H36 inprog;
+class H36 done;
   class H38 done;
   class H37 todo;
   class H11,H12,H15,H16,H17,H18,H19,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H31,H32,H33,H39 blocked;
