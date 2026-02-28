@@ -164,6 +164,7 @@ async function renderIssueGraph(issues) {
 function buildMermaidFlowchart(issues) {
   const lines = ["flowchart LR"];
   const issueMap = new Map();
+  const drawnEdges = new Set();
 
   issues.forEach((issue, index) => {
     const nodeId = `I${index + 1}`;
@@ -185,8 +186,43 @@ function buildMermaidFlowchart(issues) {
     const parentNodeId = linearIdToNodeId.get(issue.parent.id);
     const childNodeId = linearIdToNodeId.get(issue.id);
     if (parentNodeId && childNodeId) {
-      lines.push(`${parentNodeId} --> ${childNodeId}`);
+      const edgeKey = `${parentNodeId}->${childNodeId}:parent`;
+      if (!drawnEdges.has(edgeKey)) {
+        lines.push(`${parentNodeId} -->|parent| ${childNodeId}`);
+        drawnEdges.add(edgeKey);
+      }
     }
+  });
+
+  issues.forEach((issue) => {
+    const relationGroups = [issue.relations, issue.inverseRelations];
+    relationGroups.forEach((group) => {
+      const relationNodes = Array.isArray(group?.nodes) ? group.nodes : [];
+      relationNodes.forEach((relation) => {
+        const type = String(relation?.type || "").toLowerCase();
+        if (!type.includes("block")) {
+          return;
+        }
+
+        const sourceIssueId = relation?.issue?.id;
+        const targetIssueId = relation?.relatedIssue?.id;
+        if (!sourceIssueId || !targetIssueId || sourceIssueId === targetIssueId) {
+          return;
+        }
+
+        const sourceNodeId = linearIdToNodeId.get(sourceIssueId);
+        const targetNodeId = linearIdToNodeId.get(targetIssueId);
+        if (!sourceNodeId || !targetNodeId) {
+          return;
+        }
+
+        const edgeKey = `${sourceNodeId}->${targetNodeId}:blocker`;
+        if (!drawnEdges.has(edgeKey)) {
+          lines.push(`${sourceNodeId} -->|blocks| ${targetNodeId}`);
+          drawnEdges.add(edgeKey);
+        }
+      });
+    });
   });
 
   lines.push("classDef active fill:#dce8ff,stroke:#3973d8,color:#10264f");
@@ -313,6 +349,17 @@ async function getTeamIssues(apiKey, teamId) {
               parent {
                 id
               }
+              relations(first: 50) {
+                nodes {
+                  type
+                  issue {
+                    id
+                  }
+                  relatedIssue {
+                    id
+                  }
+                }
+              }
             }
           }
         }
@@ -343,16 +390,28 @@ async function linearGraphqlRequest(apiKey, query, variables = {}) {
     body: JSON.stringify({ query, variables })
   });
 
+  const rawBody = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    payload = null;
+  }
+
   if (!response.ok) {
+    const graphqlMessage =
+      payload && Array.isArray(payload.errors) && payload.errors[0] && payload.errors[0].message;
+    if (graphqlMessage) {
+      throw new Error(`Linear API request failed (${response.status}): ${graphqlMessage}`);
+    }
     throw new Error(`Linear API request failed with status ${response.status}`);
   }
 
-  const payload = await response.json();
   if (payload.errors && payload.errors.length > 0) {
     throw new Error(payload.errors[0].message || "Linear API returned an error");
   }
 
-  return payload.data;
+  return payload ? payload.data : null;
 }
 
 function getMockIssues() {
@@ -367,7 +426,9 @@ function getMockIssues() {
       updatedAt: now,
       assignee: { name: "Owner" },
       state: { name: "In Progress", type: "started" },
-      parent: null
+      parent: null,
+      relations: { nodes: [] },
+      inverseRelations: { nodes: [] }
     },
     {
       id: "2",
@@ -378,7 +439,9 @@ function getMockIssues() {
       updatedAt: now,
       assignee: { name: "Backend" },
       state: { name: "Todo", type: "unstarted" },
-      parent: { id: "1" }
+      parent: { id: "1" },
+      relations: { nodes: [] },
+      inverseRelations: { nodes: [] }
     },
     {
       id: "3",
@@ -389,7 +452,9 @@ function getMockIssues() {
       updatedAt: now,
       assignee: { name: "Frontend" },
       state: { name: "Todo", type: "unstarted" },
-      parent: { id: "1" }
+      parent: { id: "1" },
+      relations: { nodes: [] },
+      inverseRelations: { nodes: [] }
     },
     {
       id: "4",
@@ -400,7 +465,17 @@ function getMockIssues() {
       updatedAt: now,
       assignee: { name: "Infra" },
       state: { name: "Backlog", type: "backlog" },
-      parent: { id: "2" }
+      parent: { id: "2" },
+      relations: {
+        nodes: [
+          {
+            type: "blocks",
+            issue: { id: "2" },
+            relatedIssue: { id: "4" }
+          }
+        ]
+      },
+      inverseRelations: { nodes: [] }
     }
   ];
 }

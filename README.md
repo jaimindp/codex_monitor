@@ -31,6 +31,24 @@ npm install
 npm run start
 ```
 
+## Playwright MCP (recommended for UI automation)
+
+Start a local Playwright MCP server from this project:
+
+```bash
+npm run mcp:playwright
+```
+
+This exposes an MCP endpoint on the default local port from `@playwright/mcp`.
+
+For Electron runtime inspection, launch Electron with remote debugging enabled, then point Playwright MCP to that CDP endpoint:
+
+```bash
+cd Monitor
+electron . --remote-debugging-port=9222
+npx playwright-mcp --cdp-endpoint http://127.0.0.1:9222
+```
+
 ## Codex app-server integration
 
 - Requires the `codex` CLI on your `PATH`.
@@ -50,6 +68,9 @@ CODEX_BIN=/absolute/path/to/codex npm run start
     - `Linear API Key` (personal API key)
     - `Team Key` (example: `ENG`)
 - Nodes are clickable and show issue details in the right panel.
+- Edges include both:
+  - Parent -> sub-issue relationships.
+  - Blocker relationships (blocking issue -> blocked issue).
 - The first successful `Load Linear Issues` saves `LINEAR_API_KEY` and `LINEAR_TEAM_KEY` in a local `.env` file at the repo root, and these fields are auto-filled on next launch.
 - When saved credentials exist, the app automatically loads Linear issues on startup.
 - Connection settings are in an expandable panel and auto-collapse when saved credentials are detected, so the graph stays in focus.

@@ -5,7 +5,8 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron ."
+    "dev": "electron .",
+    "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access"
   },
   "keywords": [
     "electron",
@@ -14,6 +15,7 @@
   "author": "",
   "license": "MIT",
   "devDependencies": {
+    "@playwright/mcp": "^0.0.68",
     "electron": "^40.6.1"
   }
 }
