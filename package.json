@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
+    "dist": "electron-builder",
     "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
     "research:github-local": "node scripts/local-github-repo-worktree-report.js",
     "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js",
@@ -17,9 +18,32 @@
   ],
   "author": "",
   "license": "MIT",
+  "build": {
+    "appId": "com.yourname.100xcodex",
+    "productName": "100x Codex",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
+  },
   "devDependencies": {
     "@playwright/mcp": "^0.0.68",
     "electron": "^40.6.1",
+    "electron-builder": "^26.0.12",
     "playwright": "^1.59.0-alpha-1771104257000"
   }
 }
