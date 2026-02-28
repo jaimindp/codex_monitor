@@ -1,6 +1,7 @@
 # Monitor Electron App
 
 Electron monitor UI that can start/stop `codex app-server` and stream logs.
+It also includes an interactive Mermaid-based Linear issue DAG view.
 
 ## Project structure
 
@@ -34,3 +35,16 @@ npm run start
 ```bash
 CODEX_BIN=/absolute/path/to/codex npm run start
 ```
+
+## Linear issue graph (inside Electron)
+
+- In the `Linear Issue Graph` panel, you can use:
+  - `Load Mock Data` for a local graph preview.
+  - `Load Linear Issues` with:
+    - `Linear API Key` (personal API key)
+    - `Team Key` (example: `ENG`)
+- Nodes are clickable and show issue details in the right panel.
+
+Notes:
+- Mermaid is loaded from CDN (`jsdelivr`) at runtime.
+- This implementation calls Linear GraphQL directly from renderer process for MVP speed.

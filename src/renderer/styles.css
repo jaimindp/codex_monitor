@@ -10,7 +10,7 @@ body {
 }
 
 .app {
-  max-width: 860px;
+  max-width: 1200px;
   margin: 0 auto;
   padding: 48px 24px;
 }
@@ -64,4 +64,58 @@ input {
   overflow: auto;
   white-space: pre-wrap;
   font-size: 12px;
+}
+
+.graph-controls {
+  margin-top: 12px;
+}
+
+.graph-shell {
+  margin-top: 14px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 2fr 1fr;
+}
+
+.graph-shell h3 {
+  margin: 0 0 8px;
+}
+
+.graph-output {
+  min-height: 420px;
+  max-height: 62vh;
+  overflow: auto;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  background: #f9fbff;
+}
+
+.graph-details {
+  min-height: 180px;
+  border: 1px solid #d3dae6;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+  word-break: break-word;
+}
+
+.detail-issue-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1d4ed8;
+  margin-bottom: 8px;
+}
+
+.detail-item {
+  margin-bottom: 6px;
+}
+
+.graph-details a {
+  color: #1d4ed8;
+}
+
+@media (max-width: 980px) {
+  .graph-shell {
+    grid-template-columns: 1fr;
+  }
 }

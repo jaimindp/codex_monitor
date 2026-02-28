@@ -29,7 +29,33 @@
         <h2>Logs</h2>
         <pre id="log-output" class="logs"></pre>
       </div>
+      <div class="card">
+        <h2>Linear Issue Graph</h2>
+        <p>Interactive Mermaid DAG for Linear issues inside this Electron app.</p>
+        <div class="graph-controls">
+          <label for="linear-api-key">Linear API Key</label>
+          <input id="linear-api-key" type="password" placeholder="lin_api_..." />
+          <label for="linear-team-key">Team Key</label>
+          <input id="linear-team-key" type="text" placeholder="ENG" />
+          <div class="row">
+            <button id="graph-load-linear" type="button">Load Linear Issues</button>
+            <button id="graph-load-mock" type="button">Load Mock Data</button>
+          </div>
+          <p id="graph-status">Graph status: idle</p>
+        </div>
+        <div class="graph-shell">
+          <section>
+            <h3>Graph</h3>
+            <div id="graph-output" class="graph-output"></div>
+          </section>
+          <section>
+            <h3>Details</h3>
+            <div id="graph-details" class="graph-details">Click a node to inspect an issue.</div>
+          </section>
+        </div>
+      </div>
     </main>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>
