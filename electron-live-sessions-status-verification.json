@@ -1,0 +1,23 @@
+{
+  "checks": {
+    "liveSessionsListPresent": true,
+    "autoRefreshSelectPresent": true,
+    "liveRefreshLabelPresent": true,
+    "autoRefreshStatusSet": true,
+    "refreshLabelUpdated": true,
+    "sessionRowsRender": true,
+    "sessionChipsRender": true,
+    "sessionChipStatesValid": true
+  },
+  "status": {
+    "usageStatus": "Usage status: ok (24h window)",
+    "autoRefreshStatus": "Auto-refresh: every 5s",
+    "liveSessionsLastRefreshBefore": "Live sessions updated: 22:50:02",
+    "liveSessionsLastRefreshAfter": "Live sessions updated: 22:50:16",
+    "rowCount": 171,
+    "chipCount": 171
+  },
+  "artifacts": {
+    "screenshot": "/Users/jaimin/Documents/Vault/Hacks/Monitor-hack-35-hack-40-live-sessions-status-chips-and-auto-refresh/electron-live-sessions-status-verification.png"
+  }
+}

@@ -16,6 +16,7 @@ This folder tracks worktree-specific context and plans.
 - `hack-35-remove-linear-graph-intro-text`: [hack-35-remove-linear-graph-intro-text/README.md](./hack-35-remove-linear-graph-intro-text/README.md)
 - `hack-36-codex-model-and-cost-usage-tracking`: [hack-36-codex-model-and-cost-usage-tracking/README.md](./hack-36-codex-model-and-cost-usage-tracking/README.md)
 - `hack-37-git-file-research-tracking`: [hack-37-git-file-research-tracking/README.md](./hack-37-git-file-research-tracking/README.md)
+- `hack-35-hack-40-live-sessions-status-chips-and-auto-refresh`: [hack-35-hack-40-live-sessions-status-chips-and-auto-refresh/README.md](./hack-35-hack-40-live-sessions-status-chips-and-auto-refresh/README.md)
 
 ## Planned/Upcoming Worktree Docs
 

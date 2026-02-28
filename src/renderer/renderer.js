@@ -37,13 +37,17 @@ const overviewUsageMetaEl = document.getElementById("overview-usage-meta");
 const overviewUsageSessionsChartEl = document.getElementById("overview-usage-sessions-chart");
 const overviewUsageTokensChartEl = document.getElementById("overview-usage-tokens-chart");
 const usageWindowSelectEl = document.getElementById("usage-window-select");
+const usageAutoRefreshSelectEl = document.getElementById("usage-auto-refresh-select");
 const usageRefreshBtnEl = document.getElementById("usage-refresh-btn");
 const usageStatusEl = document.getElementById("usage-status");
+const usageAutoRefreshStatusEl = document.getElementById("usage-auto-refresh-status");
 const usageSummaryEl = document.getElementById("usage-summary");
 const usageModelChartEl = document.getElementById("usage-model-chart");
 const usageEffortChartEl = document.getElementById("usage-effort-chart");
 const usageTimeChartEl = document.getElementById("usage-time-chart");
 const usageWarningsEl = document.getElementById("usage-warnings");
+const liveSessionsLastRefreshEl = document.getElementById("live-sessions-last-refresh");
+const liveSessionsListEl = document.getElementById("live-sessions-list");
 const healthSummaryEl = document.getElementById("health-summary");
 const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const themeToggleGlyph = document.getElementById("theme-toggle-glyph");
@@ -117,6 +121,8 @@ let managedServersById = new Map();
 let selectedManagedServerId = "";
 let managedServerEventUnsubscribe = null;
 let isUsageSnapshotInFlight = false;
+let usageAutoRefreshTimer = null;
+let usageAutoRefreshSeconds = 0;
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const MCP_MIN_DAYS = 1;
@@ -125,6 +131,9 @@ const MCP_DEFAULT_DAYS = 7;
 const USAGE_DEFAULT_DAYS = 1;
 const USAGE_MIN_DAYS = 1;
 const USAGE_MAX_DAYS = 30;
+const USAGE_AUTO_REFRESH_DEFAULT_SECONDS = 15;
+const USAGE_SESSION_ACTIVE_MAX_AGE_MS = 2 * 60 * 1000;
+const USAGE_SESSION_IDLE_MAX_AGE_MS = 15 * 60 * 1000;
 const GRAPH_ZOOM_MIN = 0.2;
 const GRAPH_ZOOM_MAX = 2.2;
 const GRAPH_ZOOM_STEP = 0.15;
@@ -256,8 +265,21 @@ function initializeUsagePanel() {
     usageWindowSelectEl.value = String(windowDays);
     loadCodexUsageSnapshot({ forceRefresh: true });
   });
+  if (usageAutoRefreshSelectEl) {
+    usageAutoRefreshSelectEl.addEventListener("change", () => {
+      const nextSeconds = parseUsageAutoRefreshSeconds(usageAutoRefreshSelectEl.value);
+      setUsageAutoRefreshSeconds(nextSeconds);
+      if (nextSeconds > 0) {
+        loadCodexUsageSnapshot({ forceRefresh: true });
+      }
+    });
+  }
   usageRefreshBtnEl.addEventListener("click", () => loadCodexUsageSnapshot({ forceRefresh: true }));
   usageWindowSelectEl.value = String(USAGE_DEFAULT_DAYS);
+  if (usageAutoRefreshSelectEl) {
+    usageAutoRefreshSelectEl.value = String(USAGE_AUTO_REFRESH_DEFAULT_SECONDS);
+  }
+  setUsageAutoRefreshStatus("Auto-refresh: off");
   setUsageStatus("Usage status: ready");
   renderUsageSummary({
     totalSessions: 0,
@@ -269,7 +291,9 @@ function initializeUsagePanel() {
   renderUsageBars(usageEffortChartEl, [], "No effort usage in selected window.");
   renderUsageBars(usageTimeChartEl, [], "No usage over time in selected window.");
   renderUsageWarnings([]);
+  renderLiveSessions([]);
   renderOverviewUsageTrends(null);
+  setUsageAutoRefreshSeconds(parseUsageAutoRefreshSeconds(usageAutoRefreshSelectEl?.value));
   loadCodexUsageSnapshot({ forceRefresh: false });
 }
 
@@ -327,6 +351,7 @@ async function loadCodexUsageSnapshot({ forceRefresh }) {
     if (usageRefreshBtnEl) {
       usageRefreshBtnEl.disabled = false;
     }
+    restartUsageAutoRefreshTimer();
   }
 }
 
@@ -365,7 +390,133 @@ function renderUsageSnapshot(snapshot) {
     "No usage over time in selected window."
   );
   renderUsageWarnings(Array.isArray(snapshot?.warnings) ? snapshot.warnings : []);
+  renderLiveSessions(Array.isArray(snapshot?.sessions) ? snapshot.sessions : []);
   renderOverviewUsageTrends(snapshot);
+}
+
+function setUsageAutoRefreshStatus(message) {
+  if (usageAutoRefreshStatusEl) {
+    usageAutoRefreshStatusEl.textContent = message;
+  }
+}
+
+function parseUsageAutoRefreshSeconds(rawValue) {
+  const parsed = Number.parseInt(String(rawValue || "").trim(), 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return 0;
+  }
+  return Math.min(300, parsed);
+}
+
+function setUsageAutoRefreshSeconds(seconds) {
+  usageAutoRefreshSeconds = Math.max(0, Number(seconds) || 0);
+  if (usageAutoRefreshSelectEl) {
+    usageAutoRefreshSelectEl.value = String(usageAutoRefreshSeconds);
+  }
+  restartUsageAutoRefreshTimer();
+}
+
+function restartUsageAutoRefreshTimer() {
+  if (usageAutoRefreshTimer) {
+    clearInterval(usageAutoRefreshTimer);
+    usageAutoRefreshTimer = null;
+  }
+
+  if (usageAutoRefreshSeconds <= 0 || !window.monitor?.codexUsage) {
+    setUsageAutoRefreshStatus("Auto-refresh: off");
+    return;
+  }
+
+  setUsageAutoRefreshStatus(`Auto-refresh: every ${usageAutoRefreshSeconds}s`);
+  usageAutoRefreshTimer = setInterval(() => {
+    void loadCodexUsageSnapshot({ forceRefresh: true });
+  }, usageAutoRefreshSeconds * 1000);
+}
+
+function renderLiveSessions(sessions) {
+  if (!liveSessionsListEl || !liveSessionsLastRefreshEl) {
+    return;
+  }
+
+  const rows = Array.isArray(sessions) ? sessions : [];
+  liveSessionsLastRefreshEl.textContent = `Live sessions updated: ${new Date().toLocaleTimeString()}`;
+
+  if (!rows.length) {
+    liveSessionsListEl.innerHTML =
+      '<div class="live-session-row"><span>No sessions found for selected usage window.</span></div>';
+    return;
+  }
+
+  liveSessionsListEl.innerHTML = rows
+    .map((row) => {
+      const status = getSessionStatus(row?.updatedAt);
+      const sessionId = String(row?.id || "unknown");
+      const model = String(row?.model || "unknown");
+      const effort = String(row?.effort || "unknown");
+      const lastSeen = formatRelativeTime(row?.updatedAt);
+      const updatedAt = formatDate(row?.updatedAt);
+      const totalTokens = Number(row?.totalTokens || 0);
+      const estimatedCostUsd = Number(row?.estimatedCostUsd || 0);
+      const branch = String(row?.gitBranch || "");
+
+      return `
+        <article class="live-session-row">
+          <div class="live-session-head">
+            <strong>${escapeHtml(sessionId)}</strong>
+            <span class="live-session-chip state-${status.key}">${escapeHtml(status.label)}</span>
+          </div>
+          <div class="live-session-meta">
+            <span><strong>Model</strong> ${escapeHtml(model)}</span>
+            <span><strong>Effort</strong> ${escapeHtml(effort)}</span>
+            <span><strong>Last seen</strong> ${escapeHtml(lastSeen)} (${escapeHtml(updatedAt)})</span>
+            <span><strong>Tokens</strong> ${formatInteger(totalTokens)}</span>
+            <span><strong>Est. cost</strong> ${formatCurrency(estimatedCostUsd)}</span>
+            ${
+              branch
+                ? `<span><strong>Branch</strong> <code>${escapeHtml(branch)}</code></span>`
+                : "<span><strong>Branch</strong> n/a</span>"
+            }
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function getSessionStatus(updatedAt) {
+  const ts = Date.parse(String(updatedAt || ""));
+  if (!Number.isFinite(ts)) {
+    return { key: "dead", label: "dead" };
+  }
+  const ageMs = Math.max(0, Date.now() - ts);
+  if (ageMs <= USAGE_SESSION_ACTIVE_MAX_AGE_MS) {
+    return { key: "active", label: "active" };
+  }
+  if (ageMs <= USAGE_SESSION_IDLE_MAX_AGE_MS) {
+    return { key: "idle", label: "idle" };
+  }
+  return { key: "dead", label: "dead" };
+}
+
+function formatRelativeTime(isoTimestamp) {
+  if (!isoTimestamp) {
+    return "unknown";
+  }
+  const ts = Date.parse(String(isoTimestamp));
+  if (!Number.isFinite(ts)) {
+    return "unknown";
+  }
+  const ageMs = Math.max(0, Date.now() - ts);
+  if (ageMs < 60 * 1000) {
+    return "<1m ago";
+  }
+  if (ageMs < 60 * 60 * 1000) {
+    return `${Math.floor(ageMs / (60 * 1000))}m ago`;
+  }
+  if (ageMs < 24 * 60 * 60 * 1000) {
+    return `${Math.floor(ageMs / (60 * 60 * 1000))}h ago`;
+  }
+  return `${Math.floor(ageMs / (24 * 60 * 60 * 1000))}d ago`;
 }
 
 function renderOverviewUsageTrends(snapshot) {
