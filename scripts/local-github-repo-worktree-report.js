@@ -232,6 +232,8 @@ function discoverGitRepos(roots) {
     const currentBranch =
       runGit(primaryWorktreePath, ["branch", "--show-current"]) || null;
     const head = runGit(primaryWorktreePath, ["rev-parse", "HEAD"]) || null;
+    const headCommitUnixRaw = runGit(primaryWorktreePath, ["show", "-s", "--format=%ct", "HEAD"]);
+    const lastCommitUnix = Number.parseInt(headCommitUnixRaw || "0", 10);
 
     repos.push({
       repoRoot: primaryWorktreePath,
@@ -241,6 +243,7 @@ function discoverGitRepos(roots) {
       isGitHubOrigin: isGitHubOrigin(origin),
       currentBranch,
       head,
+      lastCommitUnix: Number.isFinite(lastCommitUnix) ? lastCommitUnix : 0,
       worktrees,
     });
   }
@@ -264,6 +267,7 @@ function renderText(report) {
     lines.push(`Origin: ${repo.origin || "(none)"}`);
     lines.push(`Branch: ${repo.currentBranch || "(detached/unknown)"}`);
     lines.push(`HEAD: ${repo.head || "(unknown)"}`);
+    lines.push(`Last Commit (unix): ${repo.lastCommitUnix || 0}`);
     lines.push(`Worktrees: ${repo.worktrees.length}`);
     for (const wt of repo.worktrees) {
       const branch = wt.branch || (wt.detached ? "(detached)" : "(unknown)");
