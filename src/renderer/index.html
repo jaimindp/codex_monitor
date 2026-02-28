@@ -48,10 +48,31 @@
         <main class="screen-panel is-active" data-screen-panel="overview">
           <div class="card">
             <h3>Overview</h3>
-            <p>
-              Use the left navigation to switch monitor views. This app shell keeps navigation and
-              header status shared across screens.
-            </p>
+            <p>App DB + ingestion core status for local Codex telemetry.</p>
+            <div class="row">
+              <button id="monitor-refresh-dashboard" type="button">Refresh View</button>
+              <button id="monitor-run-ingestion" type="button">Refresh From Sources</button>
+            </div>
+            <p id="monitor-ingest-status">Ingestion status: idle</p>
+            <div class="overview-metrics">
+              <div class="metric-card">
+                <span class="metric-label">Total Events</span>
+                <strong id="metric-total-events">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Events (24h)</span>
+                <strong id="metric-events-24h">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Sessions</span>
+                <strong id="metric-sessions">0</strong>
+              </div>
+              <div class="metric-card">
+                <span class="metric-label">Last Event</span>
+                <strong id="metric-last-event">never</strong>
+              </div>
+            </div>
+            <p id="metric-source-breakdown" class="metric-subtext">Sources: n/a</p>
           </div>
         </main>
 
@@ -221,118 +242,88 @@
         </main>
 
         <main class="screen-panel" data-screen-panel="usage">
-          <div class="card usage-card">
-            <header class="usage-header">
-              <div>
-                <h3>Usage</h3>
-                <p class="usage-subtitle">
-                  Local Codex telemetry rollups for the last 24 hours.
-                </p>
-              </div>
-              <button id="usage-refresh-btn" type="button">Refresh Usage</button>
-            </header>
-            <p class="usage-estimate-note">
-              Estimated cost from local telemetry (24h window, blended per-model token rates).
-            </p>
-            <p id="usage-status" class="usage-status">Usage status: waiting for local telemetry</p>
-
-            <section class="usage-summary-grid" aria-label="Usage summary">
-              <article class="usage-metric">
-                <p class="usage-metric-label">Sessions tracked</p>
-                <p id="usage-total-sessions" class="usage-metric-value">-</p>
-              </article>
-              <article class="usage-metric">
-                <p class="usage-metric-label">Models tracked</p>
-                <p id="usage-model-count" class="usage-metric-value">-</p>
-              </article>
-              <article class="usage-metric">
-                <p class="usage-metric-label">Total tokens</p>
-                <p id="usage-total-tokens" class="usage-metric-value">-</p>
-              </article>
-              <article class="usage-metric">
-                <p class="usage-metric-label">Estimated cost (USD)</p>
-                <p id="usage-estimated-cost" class="usage-metric-value">-</p>
-              </article>
-            </section>
-
-            <section class="usage-section">
-              <h4>Model Breakdown</h4>
-              <div class="usage-table-wrap">
-                <table class="usage-table">
-                  <thead>
-                    <tr>
-                      <th>Model</th>
-                      <th>Sessions</th>
-                      <th>Tokens</th>
-                      <th>Rate / 1M</th>
-                      <th>Est. Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody id="usage-model-table-body">
-                    <tr>
-                      <td colspan="5">No usage rows yet.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="usage-section">
-              <h4>Effort Breakdown</h4>
-              <div class="usage-table-wrap">
-                <table class="usage-table">
-                  <thead>
-                    <tr>
-                      <th>Effort</th>
-                      <th>Sessions</th>
-                      <th>Tokens</th>
-                      <th>Est. Cost</th>
-                    </tr>
-                  </thead>
-                  <tbody id="usage-effort-table-body">
-                    <tr>
-                      <td colspan="4">No effort rows yet.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            <section class="usage-section">
-              <h4>Recent Sessions</h4>
-              <div class="usage-table-wrap">
-                <table class="usage-table">
-                  <thead>
-                    <tr>
-                      <th>Session ID</th>
-                      <th>Model</th>
-                      <th>Tokens</th>
-                      <th>Est. Cost</th>
-                      <th>Branch</th>
-                      <th>Updated</th>
-                    </tr>
-                  </thead>
-                  <tbody id="usage-session-table-body">
-                    <tr>
-                      <td colspan="6">No sessions loaded yet.</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
+          <div class="card">
+            <h3>Usage</h3>
+            <p>Model token/cost rollups from ingested local telemetry (last 24h).</p>
+            <div id="usage-rollups" class="usage-rollups">No usage data yet.</div>
           </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="mcp-skills">
-          <div class="card"><h3>MCP + Skills</h3><p>MCP and skills placeholder.</p></div>
+          <div class="card mcp-skills-card">
+            <header class="mcp-skills-header">
+              <h3>MCP + Skills</h3>
+              <p>Local Codex session scan for MCP tool calls and skill mentions.</p>
+            </header>
+            <div class="mcp-controls">
+              <label for="mcp-days-input">Lookback (days)</label>
+              <input id="mcp-days-input" type="number" min="1" max="30" step="1" value="7" />
+              <button id="mcp-refresh-btn" type="button">Refresh Snapshot</button>
+            </div>
+            <p id="mcp-status" class="mcp-status">MCP status: idle</p>
+            <p class="mcp-meta">
+              Last updated: <span id="mcp-last-updated">never</span>
+            </p>
+
+            <div class="mcp-grid">
+              <section class="mcp-panel">
+                <h4>Summary</h4>
+                <div id="mcp-summary" class="mcp-list"></div>
+              </section>
+              <section class="mcp-panel">
+                <h4>Top MCP Tools</h4>
+                <div id="mcp-top-mcp" class="mcp-list"></div>
+              </section>
+              <section class="mcp-panel">
+                <h4>Top Skills</h4>
+                <div id="mcp-top-skills" class="mcp-list"></div>
+              </section>
+            </div>
+
+            <section class="mcp-panel">
+              <h4>Recent Session Files</h4>
+              <div id="mcp-files" class="mcp-list"></div>
+            </section>
+          </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="git-worktrees">
-          <div class="card"><h3>Git + Worktrees</h3><p>Git and worktree health placeholder.</p></div>
+          <div class="card">
+            <h3>Git + Worktrees</h3>
+            <p>Discover local GitHub repos and active worktrees using local git metadata only.</p>
+            <div class="graph-controls">
+              <label for="github-root-input">Scan root path(s)</label>
+              <input id="github-root-input" type="text" placeholder="~/Documents/Vault/Hacks" />
+              <p class="input-hint">Use one path, or multiple paths separated by commas.</p>
+              <div class="row">
+                <button id="github-scan-btn" type="button">Run Local Scan</button>
+              </div>
+              <p id="github-scan-status" class="settings-status">Git scan status: idle</p>
+              <p id="github-scan-summary" class="settings-status">No scan results yet.</p>
+            </div>
+            <div id="github-scan-overview" class="git-scan-overview">Run a scan to see aggregate stats.</div>
+            <div class="git-scan-toolbar">
+              <label for="github-page-size">Repos per page</label>
+              <select id="github-page-size">
+                <option value="10">10</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+              </select>
+              <button id="github-prev-page-btn" type="button">Previous</button>
+              <button id="github-next-page-btn" type="button">Next</button>
+              <span id="github-scan-page-status" class="settings-status">Page 0 of 0</span>
+            </div>
+            <div id="github-scan-results" class="git-scan-results">
+              Run a scan to view local repos and worktrees.
+            </div>
+          </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="health">
-          <div class="card"><h3>Health</h3><p>Health panel placeholder.</p></div>
+          <div class="card">
+            <h3>Health</h3>
+            <div id="health-summary" class="health-summary">No health data yet.</div>
+          </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="settings">
