@@ -396,12 +396,18 @@ function buildMermaidFlowchart(issues) {
   const lines = ["flowchart LR"];
   const issueMap = new Map();
   const drawnEdges = new Set();
+  const nodeStyles = [];
 
   issues.forEach((issue, index) => {
     const nodeId = `I${index + 1}`;
     const className = issue.state?.type === "completed" ? "done" : "active";
+    const stateColor = normalizeLinearColor(issue.state?.color);
+    const styleString = buildNodeStyle(stateColor);
     issueMap.set(nodeId, issue);
     lines.push(`${nodeId}["${sanitizeLabel(`${issue.identifier}: ${issue.title}`)}"]:::${className}`);
+    if (styleString) {
+      nodeStyles.push({ nodeId, styleString });
+    }
     lines.push(`click ${nodeId} onGraphNodeClick "Open issue details"`);
   });
 
@@ -454,6 +460,10 @@ function buildMermaidFlowchart(issues) {
         }
       });
     });
+  });
+
+  nodeStyles.forEach(({ nodeId, styleString }) => {
+    lines.push(`style ${nodeId} ${styleString}`);
   });
 
   lines.push("classDef active fill:#dce8ff,stroke:#3973d8,color:#10264f");
@@ -519,6 +529,53 @@ function sanitizeLabel(value) {
   return String(value).replace(/"/g, "'").replace(/\n/g, " ");
 }
 
+function normalizeLinearColor(colorValue) {
+  const raw = String(colorValue || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const normalized = raw.startsWith("#") ? raw : `#${raw}`;
+  if (!/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return null;
+  }
+  return normalized.toLowerCase();
+}
+
+function buildNodeStyle(stateColor) {
+  if (!stateColor) {
+    return "";
+  }
+  const fill = stateColor;
+  const stroke = darkenHexColor(stateColor, 0.32);
+  const text = getReadableTextColor(stateColor);
+  return `fill:${fill},stroke:${stroke},color:${text}`;
+}
+
+function darkenHexColor(hexColor, amount) {
+  const red = parseInt(hexColor.slice(1, 3), 16);
+  const green = parseInt(hexColor.slice(3, 5), 16);
+  const blue = parseInt(hexColor.slice(5, 7), 16);
+
+  const adjust = (channel) => {
+    const next = Math.round(channel * (1 - amount));
+    return Math.max(0, Math.min(255, next));
+  };
+
+  return `#${toHex(adjust(red))}${toHex(adjust(green))}${toHex(adjust(blue))}`;
+}
+
+function toHex(value) {
+  return value.toString(16).padStart(2, "0");
+}
+
+function getReadableTextColor(hexColor) {
+  const red = parseInt(hexColor.slice(1, 3), 16) / 255;
+  const green = parseInt(hexColor.slice(3, 5), 16) / 255;
+  const blue = parseInt(hexColor.slice(5, 7), 16) / 255;
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return luminance > 0.62 ? "#0f172a" : "#f8fafc";
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -576,6 +633,7 @@ async function getTeamIssues(apiKey, teamId) {
               state {
                 name
                 type
+                color
               }
               parent {
                 id
@@ -656,7 +714,7 @@ function getMockIssues() {
       priority: 2,
       updatedAt: now,
       assignee: { name: "Owner" },
-      state: { name: "In Progress", type: "started" },
+      state: { name: "In Progress", type: "started", color: "#f2c94c" },
       parent: null,
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -669,7 +727,7 @@ function getMockIssues() {
       priority: 2,
       updatedAt: now,
       assignee: { name: "Backend" },
-      state: { name: "Todo", type: "unstarted" },
+      state: { name: "Todo", type: "unstarted", color: "#94a3b8" },
       parent: { id: "1" },
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -682,7 +740,7 @@ function getMockIssues() {
       priority: 3,
       updatedAt: now,
       assignee: { name: "Frontend" },
-      state: { name: "Todo", type: "unstarted" },
+      state: { name: "Todo", type: "unstarted", color: "#94a3b8" },
       parent: { id: "1" },
       relations: { nodes: [] },
       inverseRelations: { nodes: [] }
@@ -695,7 +753,7 @@ function getMockIssues() {
       priority: 1,
       updatedAt: now,
       assignee: { name: "Infra" },
-      state: { name: "Backlog", type: "backlog" },
+      state: { name: "Backlog", type: "backlog", color: "#64748b" },
       parent: { id: "2" },
       relations: {
         nodes: [
