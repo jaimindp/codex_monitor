@@ -25,21 +25,17 @@ const SCREEN_META = {
     title: "Overview",
     subtitle: "Shared app shell and cross-screen navigation."
   },
-  timeline: {
-    title: "Timeline",
-    subtitle: "Session and event history."
+  "build-chart": {
+    title: "Build Chart",
+    subtitle: "Parent/sub-issue and blocker relationships."
   },
-  "live-sessions": {
-    title: "Live Sessions",
-    subtitle: "Active sessions and status."
+  agents: {
+    title: "Agents",
+    subtitle: "Active agent sessions and status."
   },
   usage: {
     title: "Usage",
-    subtitle: "Usage and cost visibility."
-  },
-  "credits-context": {
-    title: "Credits + Context",
-    subtitle: "Rate limits and context pressure."
+    subtitle: "Usage, timeline, and credits/context visibility."
   },
   "mcp-skills": {
     title: "MCP + Skills",
@@ -49,14 +45,6 @@ const SCREEN_META = {
     title: "Git + Worktrees",
     subtitle: "Branch/worktree health."
   },
-  "dependency-map": {
-    title: "Dependency Map",
-    subtitle: "Task DAG and delivery status."
-  },
-  "linear-graph": {
-    title: "Linear Graph",
-    subtitle: "Parent/sub-issue and blocker relationships."
-  },
   health: {
     title: "Health",
     subtitle: "Operational reliability signals."
@@ -64,14 +52,6 @@ const SCREEN_META = {
   settings: {
     title: "Settings",
     subtitle: "Runtime configuration."
-  },
-  "build-snapshots": {
-    title: "Build Snapshots",
-    subtitle: "Local build snapshot launch points."
-  },
-  "server-manager": {
-    title: "Server Manager",
-    subtitle: "Managed local server controls."
   }
 };
 
@@ -105,7 +85,7 @@ if (graphLoadMockBtn) {
       const issues = getMockIssues();
       await renderIssueGraph(issues);
       setGraphStatus(`Graph status: rendered ${issues.length} mock issues`);
-      updateLastRefresh("Linear Graph (mock)");
+      updateLastRefresh("Build Chart (mock)");
     } catch (error) {
       setGraphStatus(`Graph status: ${errorMessage(error)}`);
     }
@@ -299,7 +279,7 @@ async function loadLinearIssuesFromInputs(isAutoLoad) {
     const issues = await getTeamIssues(apiKey, team.id);
     await renderIssueGraph(issues);
     setGraphStatus(`Graph status: rendered ${issues.length} issues from ${team.key}`);
-    updateLastRefresh("Linear Graph");
+    updateLastRefresh("Build Chart");
     collapseGraphSettingsIfConfigured(apiKey, teamKey);
   } catch (error) {
     setGraphStatus(`Graph status: ${errorMessage(error)}`);
