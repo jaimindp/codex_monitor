@@ -400,9 +400,10 @@ function buildMermaidFlowchart(issues) {
 
   issues.forEach((issue, index) => {
     const nodeId = `I${index + 1}`;
-    const className = issue.state?.type === "completed" ? "done" : "active";
+    const isDone = issue.state?.type === "completed";
+    const className = isDone ? "done" : "active";
     const stateColor = normalizeLinearColor(issue.state?.color);
-    const styleString = buildNodeStyle(stateColor);
+    const styleString = isDone ? buildDoneNodeStyle() : buildNodeStyle(stateColor);
     issueMap.set(nodeId, issue);
     lines.push(`${nodeId}["${sanitizeLabel(`${issue.identifier}: ${issue.title}`)}"]:::${className}`);
     if (styleString) {
@@ -467,7 +468,7 @@ function buildMermaidFlowchart(issues) {
   });
 
   lines.push("classDef active fill:#dce8ff,stroke:#3973d8,color:#10264f");
-  lines.push("classDef done fill:#daf6df,stroke:#2d8a42,color:#12331d");
+  lines.push("classDef done fill:#d7f7e3,stroke:#1e8e3e,color:#0f5132");
 
   return {
     text: lines.join("\n"),
@@ -549,6 +550,10 @@ function buildNodeStyle(stateColor) {
   const stroke = darkenHexColor(stateColor, 0.32);
   const text = getReadableTextColor(stateColor);
   return `fill:${fill},stroke:${stroke},color:${text}`;
+}
+
+function buildDoneNodeStyle() {
+  return "fill:#d7f7e3,stroke:#1e8e3e,color:#0f5132";
 }
 
 function darkenHexColor(hexColor, amount) {
