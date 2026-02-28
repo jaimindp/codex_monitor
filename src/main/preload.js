@@ -52,5 +52,9 @@ contextBridge.exposeInMainWorld("monitor", {
         ipcRenderer.removeListener("orchestrator:event", handler);
       };
     }
+  },
+  codexUsage: {
+    get: () => ipcRenderer.invoke("codex-usage:get"),
+    refresh: () => ipcRenderer.invoke("codex-usage:refresh")
   }
 });
