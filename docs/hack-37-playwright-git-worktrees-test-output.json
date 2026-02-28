@@ -1,0 +1,10 @@
+{
+  "ok": true,
+  "ranAt": "2026-02-28T07:27:42.692Z",
+  "rootInput": "~/Documents/Vault/Hacks",
+  "status": "Git scan status: completed",
+  "summary": "Scan summary: 7 GitHub repos | 11 git candidates | generated 28/02/2026, 15:27:42",
+  "repoCount": 7,
+  "firstRepo": "/Users/jaimin/Documents/Vault/Hacks/Monitor",
+  "screenshotPath": "/Users/jaimin/Documents/Vault/Hacks/Monitor-hack-37-git-file-research-tracking/docs/hack-37-playwright-git-worktrees.png"
+}

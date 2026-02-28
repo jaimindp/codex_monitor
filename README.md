@@ -45,6 +45,23 @@ npm install
 npm run start
 ```
 
+## Local GitHub Repo Discovery (No API/Auth)
+
+Generate a local inventory of GitHub repos and their worktrees:
+
+```bash
+npm run research:github-local
+```
+
+You can also run this directly inside the Electron app from the `Git + Worktrees` screen by entering a scan root and clicking `Run Local Scan`.
+
+Direct where scanning starts by passing one or more `--root` args:
+
+```bash
+npm run research:github-local -- --root ~/Documents/Vault/Hacks --format text
+npm run research:github-local -- --root ~/Documents --root ~/code --format json
+```
+
 ## Codex app-server integration
 
 - Requires the `codex` CLI on your `PATH`.

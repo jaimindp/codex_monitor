@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
-    "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access"
+    "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
+    "research:github-local": "node scripts/local-github-repo-worktree-report.js"
   },
   "keywords": [
     "electron",

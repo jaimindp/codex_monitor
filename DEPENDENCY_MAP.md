@@ -99,7 +99,7 @@ graph TD
   class H14 inprog;
   class H25 inprog;
   class H35,H38 inprog;
-  class H37 todo;
+  class H37 done;
   class H11,H12,H15,H16,H17,H18,H19,H20,H21,H22,H23,H24,H26,H27,H28,H29,H30,H31,H32,H33,H36 blocked;
 
   classDef todo fill:#e2e3e5,stroke:#6c757d,color:#343a40;
