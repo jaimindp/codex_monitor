@@ -52,6 +52,11 @@ Use the built-in orchestrator to run a full ticket workflow with three Codex pha
 
 Then the orchestrator can commit, push, create a PR, and optionally enable auto-merge.
 
+Sub-agent routing is automatic:
+- For each run, orchestrator computes a complexity score and selects a sub-agent budget (`0`-`5`).
+- When a Linear issue is provided, complexity is based on that issue; otherwise it falls back to ticket brief heuristics.
+- Phase budgets are enforced as hard gates (`plan<=2`, `implementation<=budget`, `test<=3`).
+
 ```bash
 npm run orchestrate:ticket -- \
   --task-id hack-38 \

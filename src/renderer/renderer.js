@@ -19,6 +19,19 @@ const themeToggleBtn = document.getElementById("theme-toggle-btn");
 const themeToggleGlyph = document.getElementById("theme-toggle-glyph");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]"));
+const agentTaskIdInput = document.getElementById("agent-task-id");
+const agentTaskTitleInput = document.getElementById("agent-task-title");
+const agentTicketBriefInput = document.getElementById("agent-ticket-brief");
+const agentLinearIssueInput = document.getElementById("agent-linear-issue");
+const agentWatchUntilDoneInput = document.getElementById("agent-watch-until-done");
+const agentDryRunInput = document.getElementById("agent-dry-run");
+const agentAllowDirtyInput = document.getElementById("agent-allow-dirty");
+const agentPollSecondsInput = document.getElementById("agent-poll-seconds");
+const agentStartRunBtn = document.getElementById("agent-start-run");
+const agentStopRunBtn = document.getElementById("agent-stop-run");
+const agentStatusEl = document.getElementById("agent-status");
+const agentRunMetaEl = document.getElementById("agent-run-meta");
+const agentLogsEl = document.getElementById("agent-logs");
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
@@ -35,6 +48,9 @@ let graphPanState = {
 };
 let currentScreenId = "overview";
 let currentTheme = "dark";
+let activeOrchestratorRunId = "";
+let orchestratorLogLines = [];
+let orchestratorEventUnsubscribe = null;
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const GRAPH_ZOOM_MIN = 0.2;
@@ -42,6 +58,8 @@ const GRAPH_ZOOM_MAX = 2.2;
 const GRAPH_ZOOM_STEP = 0.15;
 const GRAPH_LABEL_WRAP_CHARS = 20;
 const GRAPH_LABEL_MAX_LINES = 3;
+const ORCHESTRATOR_ACTIVE_STATES = new Set(["starting", "running", "stopping"]);
+const ORCHESTRATOR_LOG_MAX = 600;
 const SCREEN_META = {
   overview: {
     title: "Overview",
@@ -128,6 +146,7 @@ if (linearSaveSettingsBtn && linearApiKeyInput && linearTeamKeyInput) {
 }
 
 loadLinearSettings();
+initializeOrchestratorControls();
 
 function initializeThemeControls() {
   if (themeToggleBtn) {
@@ -538,9 +557,21 @@ function renderGraphDetails(issue) {
           <span class="detail-value">${safeUpdated}</span>
         </div>
       </div>
-      <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      <div class="detail-action-row">
+        <button class="detail-deploy-btn" type="button" data-action="deploy-orchestrator">
+          Deploy Orchestrator
+        </button>
+        <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      </div>
     </article>
   `;
+
+  const deployBtn = graphDetailsEl.querySelector('[data-action="deploy-orchestrator"]');
+  if (deployBtn) {
+    deployBtn.addEventListener("click", () => {
+      void deployOrchestratorFromGraphIssue(issue);
+    });
+  }
 }
 
 function renderGraphDetailsMessage(message) {
@@ -579,6 +610,99 @@ function priorityLabel(priority) {
 
 function sanitizeLabel(value) {
   return String(value).replace(/"/g, "'").replace(/\n/g, " ");
+}
+
+function normalizeTaskToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildFallbackTaskId(issue) {
+  const fromIdentifier = normalizeTaskToken(issue?.identifier);
+  if (fromIdentifier) {
+    return fromIdentifier;
+  }
+  const fromTitle = normalizeTaskToken(issue?.title);
+  if (fromTitle) {
+    return fromTitle;
+  }
+  const fromIssueId = normalizeTaskToken(issue?.id);
+  if (fromIssueId) {
+    return `task-${fromIssueId}`;
+  }
+  return `task-${Date.now()}`;
+}
+
+function buildFallbackTaskTitle(issue) {
+  const titleToken = normalizeTaskToken(issue?.title);
+  if (titleToken) {
+    return titleToken;
+  }
+  const identifierToken = normalizeTaskToken(issue?.identifier);
+  if (identifierToken) {
+    return identifierToken;
+  }
+  return "orchestrator-task";
+}
+
+function buildTicketBriefFromIssue(issue) {
+  const identifier = String(issue?.identifier || "UNKNOWN").trim();
+  const title = String(issue?.title || "Untitled").trim();
+  const state = String(issue?.state?.name || "Unknown").trim();
+  const assignee = String(issue?.assignee?.name || "Unassigned").trim();
+  const priority = priorityLabel(issue?.priority);
+  const source = String(issue?.url || "n/a").trim();
+  return [
+    `Issue: ${identifier}`,
+    `Title: ${title}`,
+    `State: ${state}`,
+    `Priority: ${priority}`,
+    `Assignee: ${assignee}`,
+    `Source: ${source}`,
+    "Action: Run orchestrator deployment for this dependency-map issue."
+  ].join("\n");
+}
+
+function populateOrchestratorInputsFromIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  const taskId = buildFallbackTaskId(issue);
+  const taskTitle = buildFallbackTaskTitle(issue);
+  const ticketBrief = buildTicketBriefFromIssue(issue);
+  const linearIssue = String(issue.identifier || "").trim().toUpperCase();
+
+  if (agentTaskIdInput) {
+    agentTaskIdInput.value = taskId;
+  }
+  if (agentTaskTitleInput) {
+    agentTaskTitleInput.value = taskTitle;
+  }
+  if (agentTicketBriefInput) {
+    agentTicketBriefInput.value = ticketBrief;
+  }
+  if (agentLinearIssueInput && linearIssue) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.checked = true;
+  }
+  syncWatchModeUiState();
+}
+
+async function deployOrchestratorFromGraphIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  populateOrchestratorInputsFromIssue(issue);
+  setGraphStatus(`Graph status: deploying orchestrator for ${issue.identifier || "selected issue"}...`);
+  setActiveScreen("agents");
+  await startOrchestratorRunFromInputs();
 }
 
 function normalizeLinearColor(colorValue) {
@@ -1136,4 +1260,293 @@ function onGraphWheel(event) {
   const anchorY = event.clientY - rect.top;
   const scaleDirection = event.deltaY < 0 ? 1 + GRAPH_ZOOM_STEP : 1 - GRAPH_ZOOM_STEP;
   setGraphZoom(graphZoomLevel * scaleDirection, { anchorX, anchorY });
+}
+
+function initializeOrchestratorControls() {
+  if (!agentStatusEl || !agentRunMetaEl || !agentLogsEl) {
+    return;
+  }
+
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable in preload");
+    setAgentRunMetaMessage("Run metadata: unavailable");
+    updateOrchestratorButtons("idle");
+    return;
+  }
+
+  if (agentStartRunBtn) {
+    agentStartRunBtn.addEventListener("click", startOrchestratorRunFromInputs);
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.addEventListener("click", stopActiveOrchestratorRun);
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.addEventListener("change", syncWatchModeUiState);
+  }
+
+  if (!orchestratorEventUnsubscribe) {
+    orchestratorEventUnsubscribe = window.monitor.orchestrator.subscribe(handleOrchestratorEvent);
+  }
+
+  syncWatchModeUiState();
+  refreshOrchestratorStatus();
+}
+
+function syncWatchModeUiState() {
+  const watchEnabled = Boolean(agentWatchUntilDoneInput?.checked);
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.disabled = !watchEnabled;
+  }
+  if (agentPollSecondsInput) {
+    agentPollSecondsInput.disabled = !watchEnabled;
+  }
+}
+
+function setAgentStatusMessage(message) {
+  if (agentStatusEl) {
+    agentStatusEl.textContent = `Agent status: ${message}`;
+  }
+}
+
+function setAgentRunMetaMessage(message) {
+  if (agentRunMetaEl) {
+    agentRunMetaEl.textContent = message;
+  }
+}
+
+function parsePollSeconds() {
+  const raw = String(agentPollSecondsInput?.value || "").trim();
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 5) {
+    return 30;
+  }
+  return parsed;
+}
+
+function validateOrchestratorInputs() {
+  const taskId = String(agentTaskIdInput?.value || "").trim();
+  const taskTitle = String(agentTaskTitleInput?.value || "").trim();
+  const ticketBrief = String(agentTicketBriefInput?.value || "").trim();
+  const watchUntilDone = Boolean(agentWatchUntilDoneInput?.checked);
+  const linearIssue = String(agentLinearIssueInput?.value || "").trim().toUpperCase();
+  const dryRun = Boolean(agentDryRunInput?.checked);
+  const allowDirty = Boolean(agentAllowDirtyInput?.checked);
+  const pollSeconds = parsePollSeconds();
+
+  if (!taskId) {
+    throw new Error("enter a task ID");
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(taskId)) {
+    throw new Error("task ID format is invalid");
+  }
+  if (!taskTitle) {
+    throw new Error("enter a task title");
+  }
+  if (!ticketBrief) {
+    throw new Error("enter a ticket brief");
+  }
+  if (watchUntilDone && !linearIssue) {
+    throw new Error("enter a Linear issue when watch mode is enabled");
+  }
+
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+
+  return {
+    taskId,
+    taskTitle,
+    ticketBrief,
+    linearIssue,
+    watchUntilDone,
+    pollSeconds,
+    dryRun,
+    allowDirty
+  };
+}
+
+async function startOrchestratorRunFromInputs() {
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable");
+    return;
+  }
+
+  try {
+    const payload = validateOrchestratorInputs();
+    setAgentStatusMessage("starting run...");
+    setAgentRunMetaMessage("Run metadata: launching orchestrator");
+    updateOrchestratorButtons("starting");
+    orchestratorLogLines = [];
+    renderOrchestratorLogs();
+
+    const result = await window.monitor.orchestrator.start(payload);
+    const run = result?.run;
+    if (!run) {
+      throw new Error("orchestrator did not return run metadata");
+    }
+    applyOrchestratorRunSnapshot(run);
+    updateLastRefresh("Agents");
+  } catch (error) {
+    setAgentStatusMessage(errorMessage(error));
+    updateOrchestratorButtons("idle");
+  }
+}
+
+async function stopActiveOrchestratorRun() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  if (!activeOrchestratorRunId) {
+    setAgentStatusMessage("no active run to stop");
+    return;
+  }
+
+  try {
+    setAgentStatusMessage("stopping run...");
+    updateOrchestratorButtons("stopping");
+    const result = await window.monitor.orchestrator.stop(activeOrchestratorRunId);
+    const run = result?.run;
+    if (run) {
+      applyOrchestratorRunSnapshot(run);
+    }
+  } catch (error) {
+    setAgentStatusMessage(`stop failed: ${errorMessage(error)}`);
+  }
+}
+
+async function refreshOrchestratorStatus() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  try {
+    const status = await window.monitor.orchestrator.status(activeOrchestratorRunId || undefined);
+    if (status?.activeRun) {
+      applyOrchestratorRunSnapshot(status.activeRun);
+      return;
+    }
+    const mostRecent = Array.isArray(status?.recentRuns) ? status.recentRuns[0] : null;
+    if (mostRecent) {
+      applyOrchestratorRunSnapshot(mostRecent);
+      return;
+    }
+    activeOrchestratorRunId = "";
+    setAgentStatusMessage("idle");
+    setAgentRunMetaMessage("Run metadata: none");
+    updateOrchestratorButtons("idle");
+  } catch (error) {
+    setAgentStatusMessage(`status load failed: ${errorMessage(error)}`);
+    updateOrchestratorButtons("idle");
+  }
+}
+
+function applyOrchestratorRunSnapshot(run) {
+  if (!run) {
+    return;
+  }
+
+  activeOrchestratorRunId = String(run.runId || "");
+  const state = String(run.state || "unknown");
+  const runLabel = run.taskId ? `${run.taskId} (${activeOrchestratorRunId})` : activeOrchestratorRunId;
+  const errorText = run.error ? ` | error: ${run.error}` : "";
+  setAgentStatusMessage(`${state}${errorText}`);
+
+  const metadata = [
+    `Run metadata: ${runLabel || "n/a"}`,
+    `state=${state}`,
+    run.linearIssue ? `linear=${run.linearIssue}` : "linear=none",
+    run.watchUntilDone ? `watch=true@${run.pollSeconds || 30}s` : "watch=false",
+    run.runArtifactsPath ? `artifacts=${run.runArtifactsPath}` : "artifacts=pending",
+    run.prUrl ? `pr=${run.prUrl}` : "pr=none"
+  ].join(" | ");
+  setAgentRunMetaMessage(metadata);
+
+  if (Array.isArray(run.logs)) {
+    orchestratorLogLines = run.logs
+      .map((entry) => formatOrchestratorLogLine(entry?.ts, entry?.stream, entry?.text))
+      .filter(Boolean)
+      .slice(-ORCHESTRATOR_LOG_MAX);
+    renderOrchestratorLogs();
+  }
+
+  updateOrchestratorButtons(state);
+}
+
+function handleOrchestratorEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+
+  if (event.type === "state") {
+    const run = event.run;
+    if (!run) {
+      return;
+    }
+    if (activeOrchestratorRunId && run.runId !== activeOrchestratorRunId && !isRunTerminal(run.state)) {
+      return;
+    }
+    applyOrchestratorRunSnapshot(run);
+    return;
+  }
+
+  if (event.type === "log") {
+    if (!event.runId) {
+      return;
+    }
+    if (activeOrchestratorRunId && event.runId !== activeOrchestratorRunId) {
+      return;
+    }
+    if (!activeOrchestratorRunId) {
+      activeOrchestratorRunId = event.runId;
+    }
+    appendOrchestratorLogLine(event.ts, event.stream, event.text);
+  }
+}
+
+function isRunTerminal(state) {
+  return state === "completed" || state === "failed" || state === "stopped";
+}
+
+function updateOrchestratorButtons(state) {
+  const isActive = ORCHESTRATOR_ACTIVE_STATES.has(state);
+  if (agentStartRunBtn) {
+    agentStartRunBtn.disabled = isActive;
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.disabled = !isActive || !activeOrchestratorRunId;
+  }
+}
+
+function formatOrchestratorLogLine(ts, stream, text) {
+  const timestamp = ts ? new Date(ts) : null;
+  const prefix = timestamp && !Number.isNaN(timestamp.getTime()) ? timestamp.toLocaleTimeString() : "--:--:--";
+  const streamLabel = String(stream || "log").toLowerCase();
+  const line = String(text || "").trim();
+  if (!line) {
+    return "";
+  }
+  return `[${prefix}] ${streamLabel}: ${line}`;
+}
+
+function appendOrchestratorLogLine(ts, stream, text) {
+  const line = formatOrchestratorLogLine(ts, stream, text);
+  if (!line) {
+    return;
+  }
+  orchestratorLogLines.push(line);
+  if (orchestratorLogLines.length > ORCHESTRATOR_LOG_MAX) {
+    orchestratorLogLines.splice(0, orchestratorLogLines.length - ORCHESTRATOR_LOG_MAX);
+  }
+  renderOrchestratorLogs();
+}
+
+function renderOrchestratorLogs() {
+  if (!agentLogsEl) {
+    return;
+  }
+  if (!orchestratorLogLines.length) {
+    agentLogsEl.textContent = "No orchestrator output yet.";
+    return;
+  }
+  agentLogsEl.textContent = orchestratorLogLines.join("\\n");
+  agentLogsEl.scrollTop = agentLogsEl.scrollHeight;
 }

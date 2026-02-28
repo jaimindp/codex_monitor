@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron .",
     "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
-    "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js"
+    "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js",
+    "verify:agents-orchestrator": "node scripts/verify-agents-orchestrator-ui.js"
   },
   "keywords": [
     "electron",
