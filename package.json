@@ -7,8 +7,13 @@
     "start": "electron .",
     "dev": "electron .",
     "mcp:playwright": "playwright-mcp --allow-unrestricted-file-access",
+<<<<<<< HEAD
     "research:github-local": "node scripts/local-github-repo-worktree-report.js",
     "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js"
+=======
+    "orchestrate:ticket": "node scripts/orchestrator/orchestrate-ticket.js",
+    "verify:agents-orchestrator": "node scripts/verify-agents-orchestrator-ui.js"
+>>>>>>> hack-39-automated-repo-intake-and-planning
   },
   "keywords": [
     "electron",

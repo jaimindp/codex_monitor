@@ -20,6 +20,7 @@ This folder tracks worktree-specific context and plans.
 
 - `hack-39-automated-repo-intake-and-planning`: [hack-39-automated-repo-intake-and-planning/README.md](./hack-39-automated-repo-intake-and-planning/README.md)
 - `hack-39` detailed plan: [hack-39-automated-repo-intake-and-planning/PLAN.md](./hack-39-automated-repo-intake-and-planning/PLAN.md)
+- `hack-28-local-server-management`: [hack-28-local-server-management/README.md](./hack-28-local-server-management/README.md)
 
 ## Required Doc Fields Per Tree
 

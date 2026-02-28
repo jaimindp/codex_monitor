@@ -70,6 +70,11 @@ Use the built-in orchestrator to run a full ticket workflow with three Codex pha
 
 Then the orchestrator can commit, push, create a PR, and optionally enable auto-merge.
 
+Sub-agent routing is automatic:
+- For each run, orchestrator computes a complexity score and selects a sub-agent budget (`0`-`5`).
+- When a Linear issue is provided, complexity is based on that issue; otherwise it falls back to ticket brief heuristics.
+- Phase budgets are enforced as hard gates (`plan<=2`, `implementation<=budget`, `test<=3`).
+
 ```bash
 npm run orchestrate:ticket -- \
   --task-id hack-38 \
@@ -82,6 +87,17 @@ Runbook and templates:
 - `docs/orchestrator/TICKET_BRIEF_TEMPLATE.md`
 - `scripts/orchestrator/templates/*`
 - `scripts/orchestrator/schemas/*`
+
+## Managed Local Servers (Agents screen)
+
+- The `Agents` screen now includes a `Managed Local Servers` section for lifecycle control.
+- You can:
+  - Save a server entry (`name`, `command`, `arguments`, optional `cwd`).
+  - Start/stop a saved server from Electron.
+  - Remove a server; if it is running, the app stops it first before deletion.
+- Server definitions are persisted in Electron `userData` at `managed-servers.json`.
+- Removal is persistent across restart: deleted servers are not reloaded on app launch.
+- Renderer access is IPC-only through `preload.js` (`window.monitor.managedServers`).
 
 ## Codex app-server integration
 

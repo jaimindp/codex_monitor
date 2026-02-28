@@ -5,6 +5,14 @@ const path = require("path");
 const { spawn } = require("child_process");
 
 const VALID_EFFORTS = new Set(["low", "medium", "high"]);
+const LINEAR_API_URL = "https://api.linear.app/graphql";
+const REQUIRED_SKILLS_BY_PHASE = Object.freeze({
+  plan: ["start-feature-flow"],
+  implementation: ["electron-user-input-flow"],
+  test: ["create-pr-flow", "finish-feature-flow"],
+});
+const SUBAGENT_MIN = 0;
+const SUBAGENT_MAX = 5;
 
 function printHelp() {
   console.log(`Ticket Orchestrator
@@ -35,6 +43,9 @@ Options:
   --draft-pr                     Open PR as draft
   --merge-when-ready             Enable auto merge once checks pass
   --merge-method <method>        squash|merge|rebase (default: squash)
+  --linear-issue <identifier>    Linear issue identifier to monitor (e.g. HACK-34)
+  --watch-until-done             Keep process alive until Linear issue is completed
+  --poll-seconds <seconds>       Poll interval for watch mode (default: 30)
   --dry-run                      Print commands and generate placeholder artifacts only
   --help                         Show this help
 
@@ -66,6 +77,9 @@ function parseArgs(argv) {
     noPr: false,
     draftPr: false,
     mergeWhenReady: false,
+    linearIssue: "",
+    watchUntilDone: false,
+    pollSeconds: 30,
     dryRun: false,
     help: false,
   };
@@ -104,6 +118,10 @@ function parseArgs(argv) {
     }
     if (arg === "--dry-run") {
       args.dryRun = true;
+      continue;
+    }
+    if (arg === "--watch-until-done") {
+      args.watchUntilDone = true;
       continue;
     }
 
@@ -161,6 +179,14 @@ function parseArgs(argv) {
         args.mergeMethod = next;
         i += 1;
         break;
+      case "--linear-issue":
+        args.linearIssue = next;
+        i += 1;
+        break;
+      case "--poll-seconds":
+        args.pollSeconds = Number.parseInt(next, 10);
+        i += 1;
+        break;
       default:
         throw new Error(`Unknown argument: ${arg}`);
     }
@@ -197,6 +223,12 @@ function validateArgs(args) {
   }
   if (args.noPr && args.mergeWhenReady) {
     throw new Error("--merge-when-ready cannot be used with --no-pr");
+  }
+  if (args.watchUntilDone && !String(args.linearIssue || "").trim()) {
+    throw new Error("--watch-until-done requires --linear-issue <identifier>");
+  }
+  if (!Number.isFinite(args.pollSeconds) || args.pollSeconds < 5) {
+    throw new Error("--poll-seconds must be a number >= 5");
   }
 }
 
@@ -306,9 +338,527 @@ function nowStamp() {
   return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function clampSubagentCount(value) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return SUBAGENT_MIN;
+  }
+  return Math.max(SUBAGENT_MIN, Math.min(SUBAGENT_MAX, parsed));
+}
+
+function complexityLevelFromScore(score) {
+  if (score <= 3) {
+    return "low";
+  }
+  if (score <= 7) {
+    return "medium";
+  }
+  if (score <= 11) {
+    return "high";
+  }
+  return "very_high";
+}
+
+function subagentBudgetFromScore(score) {
+  if (score <= 2) {
+    return 0;
+  }
+  if (score <= 4) {
+    return 1;
+  }
+  if (score <= 7) {
+    return 2;
+  }
+  if (score <= 10) {
+    return 3;
+  }
+  if (score <= 13) {
+    return 4;
+  }
+  return 5;
+}
+
+function derivePhaseSubagentBudgets(totalBudget) {
+  const normalized = clampSubagentCount(totalBudget);
+  return {
+    plan: Math.min(2, normalized),
+    implementation: normalized,
+    test: Math.min(3, normalized),
+  };
+}
+
+function estimateTicketBriefComplexity(ticketBrief) {
+  const text = String(ticketBrief || "").trim();
+  const words = text ? text.split(/\s+/).filter(Boolean).length : 0;
+  const chars = text.length;
+  const bulletLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("- ") || line.startsWith("* ")).length;
+
+  const score = Math.max(
+    1,
+    Math.min(10, Math.floor(chars / 380)) + Math.min(4, Math.floor(words / 120)) + Math.min(2, bulletLines)
+  );
+  const subagentBudget = subagentBudgetFromScore(score);
+
+  return {
+    source: "ticket_brief",
+    score,
+    level: complexityLevelFromScore(score),
+    subagent_budget: subagentBudget,
+    signals: {
+      words,
+      chars,
+      bullet_lines: bulletLines,
+    },
+  };
+}
+
+function estimateIssueComplexity(issue) {
+  const title = String(issue?.title || "").trim();
+  const description = String(issue?.description || "").trim();
+  const priority = Number.parseInt(String(issue?.priority ?? ""), 10);
+  const estimate = Number.parseInt(String(issue?.estimate ?? ""), 10);
+  const relationNodes = Array.isArray(issue?.relations?.nodes) ? issue.relations.nodes : [];
+  const blockerRelations = relationNodes.filter((entry) =>
+    String(entry?.type || "")
+      .trim()
+      .toLowerCase()
+      .includes("block")
+  ).length;
+  const hasParent = Boolean(issue?.parent?.id);
+
+  const titleScore = Math.min(2, Math.floor(title.length / 42));
+  const descriptionScore = Math.min(6, Math.floor(description.length / 320));
+  const blockerScore = Math.min(4, blockerRelations);
+  const priorityScore =
+    priority === 1 ? 3 : priority === 2 ? 2 : priority === 3 ? 1 : 0;
+  const estimateScore =
+    Number.isFinite(estimate) && estimate > 0 ? Math.min(4, Math.max(1, Math.round(estimate / 2))) : 0;
+  const parentScore = hasParent ? 1 : 0;
+
+  const score =
+    Math.max(1, titleScore + descriptionScore + blockerScore + priorityScore + estimateScore + parentScore);
+  const subagentBudget = subagentBudgetFromScore(score);
+
+  return {
+    score,
+    level: complexityLevelFromScore(score),
+    subagent_budget: subagentBudget,
+    signals: {
+      title_length: title.length,
+      description_length: description.length,
+      blocker_relations: blockerRelations,
+      priority: Number.isFinite(priority) ? priority : 0,
+      estimate: Number.isFinite(estimate) ? estimate : 0,
+      has_parent: hasParent,
+    },
+  };
+}
+
+function buildComplexityContext(profile) {
+  const signals = profile?.signals || {};
+  return [
+    `Complexity source: ${profile?.source || "unknown"}`,
+    `Complexity score: ${profile?.score ?? 0} (${profile?.level || "unknown"})`,
+    `Selected orchestrator sub-agent budget (0-5): ${profile?.subagent_budget ?? 0}`,
+    `Linear issue: ${profile?.linear_issue || "none"}`,
+    `Signals: ${JSON.stringify(signals)}`,
+  ].join("\n");
+}
+
+function normalizeSkillName(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getRequiredSkillsForPhase(phaseName) {
+  return REQUIRED_SKILLS_BY_PHASE[phaseName] || [];
+}
+
+function assertRequiredSkills(phaseName, phaseJson) {
+  const required = getRequiredSkillsForPhase(phaseName).map(normalizeSkillName);
+  if (!required.length) {
+    return;
+  }
+
+  const skillsUsed = new Set(
+    (Array.isArray(phaseJson?.skills_used) ? phaseJson.skills_used : []).map(normalizeSkillName)
+  );
+
+  const evidenceMap = new Map();
+  (Array.isArray(phaseJson?.skill_evidence) ? phaseJson.skill_evidence : []).forEach((entry) => {
+    const skill = normalizeSkillName(entry?.skill);
+    const evidence = String(entry?.evidence || "").trim();
+    if (skill && evidence) {
+      evidenceMap.set(skill, evidence);
+    }
+  });
+
+  const missingSkills = required.filter((skill) => !skillsUsed.has(skill));
+  const missingEvidence = required.filter((skill) => !evidenceMap.has(skill));
+
+  if (missingSkills.length || missingEvidence.length) {
+    throw new Error(
+      `Skill gate failed for phase '${phaseName}'. Missing skills: ${missingSkills.join(", ") || "none"}. Missing evidence: ${missingEvidence.join(", ") || "none"}.`
+    );
+  }
+}
+
+function assertSubagentUsage(phaseName, phaseJson, phaseBudget) {
+  const usage = phaseJson?.subagent_usage;
+  if (!usage || typeof usage !== "object") {
+    throw new Error(`Sub-agent gate failed for phase '${phaseName}'. Missing subagent_usage block.`);
+  }
+
+  const reportedBudget = clampSubagentCount(usage.budget);
+  const spawned = clampSubagentCount(usage.spawned);
+  const notes = String(usage.notes || "").trim();
+
+  if (reportedBudget !== phaseBudget) {
+    throw new Error(
+      `Sub-agent gate failed for phase '${phaseName}'. Expected budget=${phaseBudget}, got ${reportedBudget}.`
+    );
+  }
+  if (spawned > reportedBudget) {
+    throw new Error(
+      `Sub-agent gate failed for phase '${phaseName}'. Spawned ${spawned}, exceeds budget ${reportedBudget}.`
+    );
+  }
+  if (!notes) {
+    throw new Error(`Sub-agent gate failed for phase '${phaseName}'. Missing subagent_usage.notes.`);
+  }
+}
+
 async function assertTooling(repoRoot, dryRun) {
   await runCommand("codex", ["--version"], { cwd: repoRoot, capture: true, dryRun });
   await runCommand("gh", ["--version"], { cwd: repoRoot, capture: true, dryRun });
+}
+
+function parseDotEnv(contents) {
+  const env = {};
+  (contents || "").split(/\r?\n/).forEach((line) => {
+    const match = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+    if (!match) {
+      return;
+    }
+    const key = match[1];
+    let value = match[2] || "";
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    env[key] = value;
+  });
+  return env;
+}
+
+function loadLocalEnv(repoRoot) {
+  const envFilePath = path.join(repoRoot, ".env");
+  if (!fs.existsSync(envFilePath)) {
+    return {};
+  }
+  return parseDotEnv(fs.readFileSync(envFilePath, "utf8"));
+}
+
+function resolveLinearAuth(repoRoot) {
+  const localEnv = loadLocalEnv(repoRoot);
+  const apiKey = (process.env.LINEAR_API_KEY || localEnv.LINEAR_API_KEY || "").trim();
+  const teamKey = (process.env.LINEAR_TEAM_KEY || localEnv.LINEAR_TEAM_KEY || "").trim().toUpperCase();
+  if (!apiKey) {
+    throw new Error("LINEAR_API_KEY is required for Linear issue monitoring/complexity lookup");
+  }
+  if (!teamKey) {
+    throw new Error("LINEAR_TEAM_KEY is required for Linear issue monitoring/complexity lookup");
+  }
+  return { apiKey, teamKey };
+}
+
+async function linearGraphqlRequest(apiKey, query, variables = {}) {
+  const response = await fetch(LINEAR_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: apiKey,
+    },
+    body: JSON.stringify({ query, variables }),
+  });
+
+  const rawBody = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(rawBody);
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const graphqlMessage =
+      payload && Array.isArray(payload.errors) && payload.errors[0] && payload.errors[0].message;
+    if (graphqlMessage) {
+      throw new Error(`Linear API request failed (${response.status}): ${graphqlMessage}`);
+    }
+    throw new Error(`Linear API request failed with status ${response.status}`);
+  }
+
+  if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
+    throw new Error(payload.errors[0].message || "Linear API returned an error");
+  }
+
+  return payload ? payload.data : null;
+}
+
+async function getTeamByKey(apiKey, teamKey) {
+  const query = `
+    query Teams {
+      teams(first: 100) {
+        nodes {
+          id
+          key
+          name
+        }
+      }
+    }
+  `;
+  const data = await linearGraphqlRequest(apiKey, query);
+  const nodes = (data && data.teams && data.teams.nodes) || [];
+  return nodes.find((team) => String(team.key).toUpperCase() === teamKey) || null;
+}
+
+async function findIssueStateByIdentifier({ apiKey, teamId, issueIdentifier }) {
+  let hasNextPage = true;
+  let after = null;
+  const normalizedIdentifier = String(issueIdentifier || "").trim().toUpperCase();
+
+  while (hasNextPage) {
+    const query = `
+      query TeamIssues($teamId: String!, $after: String) {
+        team(id: $teamId) {
+          issues(first: 100, after: $after, includeArchived: false) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              id
+              identifier
+              state {
+                name
+                type
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const data = await linearGraphqlRequest(apiKey, query, { teamId, after });
+    const page = data && data.team && data.team.issues;
+    if (!page) {
+      return null;
+    }
+
+    const issue = (page.nodes || []).find(
+      (node) => String(node.identifier || "").trim().toUpperCase() === normalizedIdentifier
+    );
+    if (issue) {
+      return issue.state || null;
+    }
+
+    hasNextPage = Boolean(page.pageInfo && page.pageInfo.hasNextPage);
+    after = page.pageInfo ? page.pageInfo.endCursor : null;
+  }
+
+  return null;
+}
+
+async function findIssueForComplexityByIdentifier({ apiKey, teamId, issueIdentifier }) {
+  let hasNextPage = true;
+  let after = null;
+  const normalizedIdentifier = String(issueIdentifier || "").trim().toUpperCase();
+
+  while (hasNextPage) {
+    const query = `
+      query TeamIssuesForComplexity($teamId: String!, $after: String) {
+        team(id: $teamId) {
+          issues(first: 100, after: $after, includeArchived: false) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            nodes {
+              id
+              identifier
+              title
+              description
+              priority
+              estimate
+              parent {
+                id
+              }
+              relations(first: 50) {
+                nodes {
+                  type
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const data = await linearGraphqlRequest(apiKey, query, { teamId, after });
+    const page = data && data.team && data.team.issues;
+    if (!page) {
+      return null;
+    }
+
+    const issue = (page.nodes || []).find(
+      (node) => String(node.identifier || "").trim().toUpperCase() === normalizedIdentifier
+    );
+    if (issue) {
+      return issue;
+    }
+
+    hasNextPage = Boolean(page.pageInfo && page.pageInfo.hasNextPage);
+    after = page.pageInfo ? page.pageInfo.endCursor : null;
+  }
+
+  return null;
+}
+
+async function resolveComplexityProfile({ rawArgs, repoRoot, ticketBrief, dryRun }) {
+  const fallback = estimateTicketBriefComplexity(ticketBrief);
+  const normalizedIssue = String(rawArgs.linearIssue || "").trim().toUpperCase();
+
+  if (!normalizedIssue) {
+    return {
+      ...fallback,
+      linear_issue: "",
+      source: "ticket_brief",
+      notes: "No Linear issue supplied; used ticket brief complexity heuristic.",
+    };
+  }
+
+  if (dryRun) {
+    return {
+      ...fallback,
+      linear_issue: normalizedIssue,
+      source: "ticket_brief_dry_run",
+      notes: "Dry run skipped live Linear complexity lookup.",
+    };
+  }
+
+  try {
+    const { apiKey, teamKey } = resolveLinearAuth(repoRoot);
+    const team = await getTeamByKey(apiKey, teamKey);
+    if (!team) {
+      return {
+        ...fallback,
+        linear_issue: normalizedIssue,
+        source: "ticket_brief_fallback",
+        notes: `Could not resolve Linear team ${teamKey}; used ticket brief complexity heuristic.`,
+      };
+    }
+
+    const issue = await findIssueForComplexityByIdentifier({
+      apiKey,
+      teamId: team.id,
+      issueIdentifier: normalizedIssue,
+    });
+    if (!issue) {
+      return {
+        ...fallback,
+        linear_issue: normalizedIssue,
+        source: "ticket_brief_fallback",
+        notes: `Issue ${normalizedIssue} not found on team ${team.key}; used ticket brief complexity heuristic.`,
+      };
+    }
+
+    const issueComplexity = estimateIssueComplexity(issue);
+    return {
+      ...issueComplexity,
+      linear_issue: normalizedIssue,
+      source: "linear_issue",
+      notes: `Complexity derived from Linear issue ${normalizedIssue} on team ${team.key}.`,
+    };
+  } catch (error) {
+    return {
+      ...fallback,
+      linear_issue: normalizedIssue,
+      source: "ticket_brief_fallback",
+      notes: `Linear complexity lookup failed (${error.message}); used ticket brief complexity heuristic.`,
+    };
+  }
+}
+
+async function waitUntilLinearIssueDone({ repoRoot, issueIdentifier, pollSeconds, dryRun }) {
+  if (!issueIdentifier) {
+    return {
+      enabled: false,
+      issueIdentifier: "",
+      completed: false,
+      polls: 0,
+      finalState: null,
+    };
+  }
+
+  if (dryRun) {
+    console.log(`Watch mode dry-run: skipping Linear polling for ${issueIdentifier}`);
+    return {
+      enabled: true,
+      issueIdentifier,
+      completed: true,
+      polls: 0,
+      finalState: "dry_run",
+    };
+  }
+
+  const { apiKey, teamKey } = resolveLinearAuth(repoRoot);
+  const team = await getTeamByKey(apiKey, teamKey);
+  if (!team) {
+    throw new Error(`Could not find Linear team by key ${teamKey}`);
+  }
+
+  let polls = 0;
+  while (true) {
+    polls += 1;
+    const state = await findIssueStateByIdentifier({
+      apiKey,
+      teamId: team.id,
+      issueIdentifier,
+    });
+    if (!state) {
+      console.log(
+        `Watch mode: issue ${issueIdentifier} not found on team ${team.key}. Poll ${polls}; retrying in ${pollSeconds}s...`
+      );
+      await sleep(pollSeconds * 1000);
+      continue;
+    }
+
+    const stateName = String(state.name || "Unknown");
+    const stateType = String(state.type || "unknown");
+    console.log(
+      `Watch mode: issue ${issueIdentifier} currently ${stateName} (${stateType}). Poll ${polls}.`
+    );
+    if (stateType === "completed") {
+      console.log(`Watch mode: issue ${issueIdentifier} is completed. Exiting watch loop.`);
+      return {
+        enabled: true,
+        issueIdentifier,
+        completed: true,
+        polls,
+        finalState: stateType,
+      };
+    }
+    await sleep(pollSeconds * 1000);
+  }
 }
 
 async function getRepoContext(repoRoot, dryRun) {
@@ -357,6 +907,14 @@ function buildPrompt(templatePath, values) {
 }
 
 function phasePlaceholder(phaseName, context) {
+  const budget = clampSubagentCount(context?.subagentBudget);
+  const defaultSpawned =
+    budget === 0
+      ? 0
+      : phaseName === "implementation"
+        ? Math.min(2, budget)
+        : Math.min(1, budget);
+
   if (phaseName === "plan") {
     return {
       summary: `Dry-run plan for ${context.taskId}`,
@@ -368,6 +926,18 @@ function phasePlaceholder(phaseName, context) {
       validation_commands: ["npm run start"],
       acceptance_criteria: ["Feature flow works end-to-end"],
       risks: ["Dry run did not execute codex agents"],
+      skills_used: ["start-feature-flow"],
+      skill_evidence: [
+        {
+          skill: "start-feature-flow",
+          evidence: "Dry-run placeholder: task kickoff lifecycle is required before implementation.",
+        },
+      ],
+      subagent_usage: {
+        budget,
+        spawned: defaultSpawned,
+        notes: "Dry-run placeholder: no real sub-agents were spawned.",
+      },
     };
   }
 
@@ -379,6 +949,18 @@ function phasePlaceholder(phaseName, context) {
       commands_run: ["(dry-run placeholder)"],
       blockers: [],
       ready_for_test: true,
+      skills_used: ["electron-user-input-flow"],
+      skill_evidence: [
+        {
+          skill: "electron-user-input-flow",
+          evidence: "Dry-run placeholder: implementation must follow renderer->preload->main input flow.",
+        },
+      ],
+      subagent_usage: {
+        budget,
+        spawned: defaultSpawned,
+        notes: "Dry-run placeholder: no real sub-agents were spawned.",
+      },
     };
   }
 
@@ -395,6 +977,22 @@ function phasePlaceholder(phaseName, context) {
     ],
     residual_risks: ["No real validation performed in dry run"],
     coverage_notes: ["Dry run skipped codex execution"],
+    skills_used: ["create-pr-flow", "finish-feature-flow"],
+    skill_evidence: [
+      {
+        skill: "create-pr-flow",
+        evidence: "Dry-run placeholder: PR package generation is part of terminal validation.",
+      },
+      {
+        skill: "finish-feature-flow",
+        evidence: "Dry-run placeholder: lifecycle closeout sync is required before completion.",
+      },
+    ],
+    subagent_usage: {
+      budget,
+      spawned: defaultSpawned,
+      notes: "Dry-run placeholder: no real sub-agents were spawned.",
+    },
   };
 }
 
@@ -408,12 +1006,13 @@ async function runCodexPhase({
   outputPath,
   dryRun,
   taskId,
+  phaseSubagentBudget,
 }) {
   console.log(`\n== ${phaseName.toUpperCase()} AGENT ==`);
-  console.log(`model=${model} effort=${effort}`);
+  console.log(`model=${model} effort=${effort} subagent_budget=${phaseSubagentBudget}`);
 
   if (dryRun) {
-    const placeholder = phasePlaceholder(phaseName, { taskId });
+    const placeholder = phasePlaceholder(phaseName, { taskId, subagentBudget: phaseSubagentBudget });
     writeText(outputPath, `${JSON.stringify(placeholder, null, 2)}\n`);
     return placeholder;
   }
@@ -554,12 +1153,30 @@ async function main() {
   const implSchemaPath = path.join(scriptRoot, "schemas", "implementation.schema.json");
   const testSchemaPath = path.join(scriptRoot, "schemas", "test.schema.json");
 
+  const complexityProfile = await resolveComplexityProfile({
+    rawArgs,
+    repoRoot,
+    ticketBrief,
+    dryRun: rawArgs.dryRun,
+  });
+  const phaseSubagentBudgets = derivePhaseSubagentBudgets(complexityProfile.subagent_budget);
+  const complexityContext = buildComplexityContext(complexityProfile);
+
+  console.log(
+    `Complexity routing: source=${complexityProfile.source} score=${complexityProfile.score} level=${complexityProfile.level} total_subagent_budget=${complexityProfile.subagent_budget}`
+  );
+  console.log(
+    `Phase sub-agent budgets: plan=${phaseSubagentBudgets.plan}, implementation=${phaseSubagentBudgets.implementation}, test=${phaseSubagentBudgets.test}`
+  );
+
   const planPrompt = buildPrompt(planPromptPath, {
     TASK_ID: rawArgs.taskId,
     TASK_TITLE: rawArgs.taskTitle,
     TICKET_BRIEF: ticketBrief,
     REPO_ROOT: repoRoot,
     BRANCH: repoContext.branch,
+    COMPLEXITY_CONTEXT: complexityContext,
+    PHASE_SUBAGENT_BUDGET: String(phaseSubagentBudgets.plan),
   });
 
   const planOutputPath = path.join(runDir, "01-plan.json");
@@ -573,7 +1190,10 @@ async function main() {
     outputPath: planOutputPath,
     dryRun: rawArgs.dryRun,
     taskId: rawArgs.taskId,
+    phaseSubagentBudget: phaseSubagentBudgets.plan,
   });
+  assertRequiredSkills("plan", planJson);
+  assertSubagentUsage("plan", planJson, phaseSubagentBudgets.plan);
 
   const implementationPrompt = buildPrompt(implPromptPath, {
     TASK_ID: rawArgs.taskId,
@@ -582,6 +1202,8 @@ async function main() {
     PLAN_JSON: JSON.stringify(planJson, null, 2),
     REPO_ROOT: repoRoot,
     BRANCH: repoContext.branch,
+    COMPLEXITY_CONTEXT: complexityContext,
+    PHASE_SUBAGENT_BUDGET: String(phaseSubagentBudgets.implementation),
   });
 
   const implOutputPath = path.join(runDir, "02-implementation.json");
@@ -595,7 +1217,10 @@ async function main() {
     outputPath: implOutputPath,
     dryRun: rawArgs.dryRun,
     taskId: rawArgs.taskId,
+    phaseSubagentBudget: phaseSubagentBudgets.implementation,
   });
+  assertRequiredSkills("implementation", implementationJson);
+  assertSubagentUsage("implementation", implementationJson, phaseSubagentBudgets.implementation);
 
   if (!implementationJson.ready_for_test) {
     throw new Error(`Implementation agent reported not ready for test: ${(implementationJson.blockers || []).join("; ")}`);
@@ -609,6 +1234,8 @@ async function main() {
     IMPLEMENTATION_JSON: JSON.stringify(implementationJson, null, 2),
     REPO_ROOT: repoRoot,
     BRANCH: repoContext.branch,
+    COMPLEXITY_CONTEXT: complexityContext,
+    PHASE_SUBAGENT_BUDGET: String(phaseSubagentBudgets.test),
   });
 
   const testOutputPath = path.join(runDir, "03-test.json");
@@ -622,7 +1249,10 @@ async function main() {
     outputPath: testOutputPath,
     dryRun: rawArgs.dryRun,
     taskId: rawArgs.taskId,
+    phaseSubagentBudget: phaseSubagentBudgets.test,
   });
+  assertRequiredSkills("test", testJson);
+  assertSubagentUsage("test", testJson, phaseSubagentBudgets.test);
 
   if (!testJson.passed || !testJson.ready_for_pr) {
     const failedChecks = (testJson.checks || [])
@@ -681,6 +1311,22 @@ async function main() {
     }
   }
 
+  let watchResult = {
+    enabled: false,
+    issueIdentifier: "",
+    completed: false,
+    polls: 0,
+    finalState: null,
+  };
+  if (rawArgs.watchUntilDone) {
+    watchResult = await waitUntilLinearIssueDone({
+      repoRoot,
+      issueIdentifier: rawArgs.linearIssue,
+      pollSeconds: rawArgs.pollSeconds,
+      dryRun: rawArgs.dryRun,
+    });
+  }
+
   const summary = {
     task_id: rawArgs.taskId,
     task_title: rawArgs.taskTitle,
@@ -690,6 +1336,9 @@ async function main() {
     test_effort: rawArgs.testEffort,
     branch: repoContext.branch,
     base: rawArgs.base,
+    linear_issue: rawArgs.linearIssue || "",
+    watch_until_done: Boolean(rawArgs.watchUntilDone),
+    poll_seconds: rawArgs.pollSeconds,
     dry_run: rawArgs.dryRun,
     run_dir: runDir,
     outputs: {
@@ -700,6 +1349,9 @@ async function main() {
       pr_body: prBodyPath,
     },
     pr_url: prUrl,
+    watch_result: watchResult,
+    complexity_profile: complexityProfile,
+    phase_subagent_budgets: phaseSubagentBudgets,
     merge_when_ready: rawArgs.mergeWhenReady,
     timestamp: new Date().toISOString(),
   };

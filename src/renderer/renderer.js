@@ -47,6 +47,30 @@ const mcpTopSkillsEl = document.getElementById("mcp-top-skills");
 const mcpFilesEl = document.getElementById("mcp-files");
 const navButtons = Array.from(document.querySelectorAll(".nav-btn"));
 const screenPanels = Array.from(document.querySelectorAll("[data-screen-panel]"));
+const agentTaskIdInput = document.getElementById("agent-task-id");
+const agentTaskTitleInput = document.getElementById("agent-task-title");
+const agentTicketBriefInput = document.getElementById("agent-ticket-brief");
+const agentLinearIssueInput = document.getElementById("agent-linear-issue");
+const agentWatchUntilDoneInput = document.getElementById("agent-watch-until-done");
+const agentDryRunInput = document.getElementById("agent-dry-run");
+const agentAllowDirtyInput = document.getElementById("agent-allow-dirty");
+const agentPollSecondsInput = document.getElementById("agent-poll-seconds");
+const agentStartRunBtn = document.getElementById("agent-start-run");
+const agentStopRunBtn = document.getElementById("agent-stop-run");
+const agentStatusEl = document.getElementById("agent-status");
+const agentRunMetaEl = document.getElementById("agent-run-meta");
+const agentTimelineEl = document.getElementById("agent-timeline");
+const agentLogsEl = document.getElementById("agent-logs");
+const managedServerIdInput = document.getElementById("managed-server-id");
+const managedServerNameInput = document.getElementById("managed-server-name");
+const managedServerCommandInput = document.getElementById("managed-server-command");
+const managedServerArgsInput = document.getElementById("managed-server-args");
+const managedServerCwdInput = document.getElementById("managed-server-cwd");
+const managedServerSaveBtn = document.getElementById("managed-server-save");
+const managedServerClearBtn = document.getElementById("managed-server-clear");
+const managedServerStatusEl = document.getElementById("managed-server-status");
+const managedServerListEl = document.getElementById("managed-server-list");
+const managedServerLogsEl = document.getElementById("managed-server-logs");
 
 let graphIssuesByNodeId = new Map();
 let isGraphLoadInFlight = false;
@@ -64,12 +88,24 @@ let graphPanState = {
 };
 let currentScreenId = "overview";
 let currentTheme = "dark";
+<<<<<<< HEAD
 const GITHUB_SCAN_ROOTS_STORAGE_KEY = "monitor.githubScan.roots";
 let isMcpSnapshotInFlight = false;
 const DEFAULT_GITHUB_SCAN_PAGE_SIZE = 25;
 let githubScanRepos = [];
 let githubScanPage = 1;
 let githubScanPageSize = DEFAULT_GITHUB_SCAN_PAGE_SIZE;
+=======
+let activeOrchestratorRunId = "";
+let timelineRunId = "";
+let orchestratorLogLines = [];
+let orchestratorTimelineItems = [];
+const orchestratorTimelineKeys = new Set();
+let orchestratorEventUnsubscribe = null;
+let managedServersById = new Map();
+let selectedManagedServerId = "";
+let managedServerEventUnsubscribe = null;
+>>>>>>> hack-39-automated-repo-intake-and-planning
 
 const LINEAR_API_URL = "https://api.linear.app/graphql";
 const MCP_MIN_DAYS = 1;
@@ -80,6 +116,9 @@ const GRAPH_ZOOM_MAX = 2.2;
 const GRAPH_ZOOM_STEP = 0.15;
 const GRAPH_LABEL_WRAP_CHARS = 20;
 const GRAPH_LABEL_MAX_LINES = 3;
+const ORCHESTRATOR_ACTIVE_STATES = new Set(["starting", "running", "stopping"]);
+const ORCHESTRATOR_LOG_MAX = 600;
+const ORCHESTRATOR_TIMELINE_MAX = 80;
 const SCREEN_META = {
   overview: {
     title: "Overview",
@@ -167,6 +206,7 @@ if (linearSaveSettingsBtn && linearApiKeyInput && linearTeamKeyInput) {
 }
 
 loadLinearSettings();
+<<<<<<< HEAD
 initializeGitRepoScanPanel();
 initializeMcpSkillTracking();
 
@@ -188,6 +228,10 @@ function initializeMcpSkillTracking() {
   renderMcpList(mcpFilesEl, []);
   loadMcpSkillSnapshot(true);
 }
+=======
+initializeOrchestratorControls();
+initializeManagedServerControls();
+>>>>>>> hack-39-automated-repo-intake-and-planning
 
 function initializeThemeControls() {
   if (themeToggleBtn) {
@@ -1247,9 +1291,21 @@ function renderGraphDetails(issue) {
           <span class="detail-value">${safeUpdated}</span>
         </div>
       </div>
-      <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      <div class="detail-action-row">
+        <button class="detail-deploy-btn" type="button" data-action="deploy-orchestrator">
+          Deploy Orchestrator
+        </button>
+        <a class="detail-link" href="${safeUrl}" target="_blank" rel="noreferrer">Open in Linear</a>
+      </div>
     </article>
   `;
+
+  const deployBtn = graphDetailsEl.querySelector('[data-action="deploy-orchestrator"]');
+  if (deployBtn) {
+    deployBtn.addEventListener("click", () => {
+      void deployOrchestratorFromGraphIssue(issue);
+    });
+  }
 }
 
 function renderGraphDetailsMessage(message) {
@@ -1288,6 +1344,99 @@ function priorityLabel(priority) {
 
 function sanitizeLabel(value) {
   return String(value).replace(/"/g, "'").replace(/\n/g, " ");
+}
+
+function normalizeTaskToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildFallbackTaskId(issue) {
+  const fromIdentifier = normalizeTaskToken(issue?.identifier);
+  if (fromIdentifier) {
+    return fromIdentifier;
+  }
+  const fromTitle = normalizeTaskToken(issue?.title);
+  if (fromTitle) {
+    return fromTitle;
+  }
+  const fromIssueId = normalizeTaskToken(issue?.id);
+  if (fromIssueId) {
+    return `task-${fromIssueId}`;
+  }
+  return `task-${Date.now()}`;
+}
+
+function buildFallbackTaskTitle(issue) {
+  const titleToken = normalizeTaskToken(issue?.title);
+  if (titleToken) {
+    return titleToken;
+  }
+  const identifierToken = normalizeTaskToken(issue?.identifier);
+  if (identifierToken) {
+    return identifierToken;
+  }
+  return "orchestrator-task";
+}
+
+function buildTicketBriefFromIssue(issue) {
+  const identifier = String(issue?.identifier || "UNKNOWN").trim();
+  const title = String(issue?.title || "Untitled").trim();
+  const state = String(issue?.state?.name || "Unknown").trim();
+  const assignee = String(issue?.assignee?.name || "Unassigned").trim();
+  const priority = priorityLabel(issue?.priority);
+  const source = String(issue?.url || "n/a").trim();
+  return [
+    `Issue: ${identifier}`,
+    `Title: ${title}`,
+    `State: ${state}`,
+    `Priority: ${priority}`,
+    `Assignee: ${assignee}`,
+    `Source: ${source}`,
+    "Action: Run orchestrator deployment for this dependency-map issue."
+  ].join("\n");
+}
+
+function populateOrchestratorInputsFromIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  const taskId = buildFallbackTaskId(issue);
+  const taskTitle = buildFallbackTaskTitle(issue);
+  const ticketBrief = buildTicketBriefFromIssue(issue);
+  const linearIssue = String(issue.identifier || "").trim().toUpperCase();
+
+  if (agentTaskIdInput) {
+    agentTaskIdInput.value = taskId;
+  }
+  if (agentTaskTitleInput) {
+    agentTaskTitleInput.value = taskTitle;
+  }
+  if (agentTicketBriefInput) {
+    agentTicketBriefInput.value = ticketBrief;
+  }
+  if (agentLinearIssueInput && linearIssue) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.checked = true;
+  }
+  syncWatchModeUiState();
+}
+
+async function deployOrchestratorFromGraphIssue(issue) {
+  if (!issue) {
+    return;
+  }
+
+  populateOrchestratorInputsFromIssue(issue);
+  setGraphStatus(`Graph status: deploying orchestrator for ${issue.identifier || "selected issue"}...`);
+  setActiveScreen("agents");
+  await startOrchestratorRunFromInputs();
 }
 
 function normalizeLinearColor(colorValue) {
@@ -1874,4 +2023,842 @@ function onGraphWheel(event) {
   const anchorY = event.clientY - rect.top;
   const scaleDirection = event.deltaY < 0 ? 1 + GRAPH_ZOOM_STEP : 1 - GRAPH_ZOOM_STEP;
   setGraphZoom(graphZoomLevel * scaleDirection, { anchorX, anchorY });
+}
+
+function initializeOrchestratorControls() {
+  if (!agentStatusEl || !agentRunMetaEl || !agentLogsEl || !agentTimelineEl) {
+    return;
+  }
+
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable in preload");
+    setAgentRunMetaMessage("Run metadata: unavailable");
+    updateOrchestratorButtons("idle");
+    return;
+  }
+
+  if (agentStartRunBtn) {
+    agentStartRunBtn.addEventListener("click", startOrchestratorRunFromInputs);
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.addEventListener("click", stopActiveOrchestratorRun);
+  }
+  if (agentWatchUntilDoneInput) {
+    agentWatchUntilDoneInput.addEventListener("change", syncWatchModeUiState);
+  }
+
+  if (!orchestratorEventUnsubscribe) {
+    orchestratorEventUnsubscribe = window.monitor.orchestrator.subscribe(handleOrchestratorEvent);
+  }
+
+  syncWatchModeUiState();
+  refreshOrchestratorStatus();
+}
+
+function syncWatchModeUiState() {
+  const watchEnabled = Boolean(agentWatchUntilDoneInput?.checked);
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.disabled = !watchEnabled;
+  }
+  if (agentPollSecondsInput) {
+    agentPollSecondsInput.disabled = !watchEnabled;
+  }
+}
+
+function setAgentStatusMessage(message) {
+  if (agentStatusEl) {
+    agentStatusEl.textContent = `Agent status: ${message}`;
+  }
+}
+
+function setAgentRunMetaMessage(message) {
+  if (agentRunMetaEl) {
+    agentRunMetaEl.textContent = message;
+  }
+}
+
+function formatTimelineTime(ts) {
+  const date = ts ? new Date(ts) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return "--:--:--";
+  }
+  return date.toLocaleTimeString();
+}
+
+function resetOrchestratorTimeline(runId = "") {
+  timelineRunId = String(runId || "");
+  orchestratorTimelineItems = [];
+  orchestratorTimelineKeys.clear();
+  renderOrchestratorTimeline();
+}
+
+function addOrchestratorTimelineEntry({ ts, label, key }) {
+  const text = String(label || "").trim();
+  if (!text) {
+    return;
+  }
+
+  const scopedKey = key ? `${timelineRunId || "global"}:${key}` : "";
+  if (scopedKey && orchestratorTimelineKeys.has(scopedKey)) {
+    return;
+  }
+
+  if (scopedKey) {
+    orchestratorTimelineKeys.add(scopedKey);
+  }
+
+  orchestratorTimelineItems.push({
+    ts: ts || new Date().toISOString(),
+    label: text,
+    key: scopedKey
+  });
+
+  if (orchestratorTimelineItems.length > ORCHESTRATOR_TIMELINE_MAX) {
+    const removed = orchestratorTimelineItems.splice(
+      0,
+      orchestratorTimelineItems.length - ORCHESTRATOR_TIMELINE_MAX
+    );
+    removed.forEach((entry) => {
+      if (entry.key) {
+        orchestratorTimelineKeys.delete(entry.key);
+      }
+    });
+  }
+
+  renderOrchestratorTimeline();
+}
+
+function renderOrchestratorTimeline() {
+  if (!agentTimelineEl) {
+    return;
+  }
+
+  if (!orchestratorTimelineItems.length) {
+    agentTimelineEl.innerHTML = `
+      <li class="agent-timeline-item is-placeholder">
+        <span class="agent-timeline-label">No timeline events yet.</span>
+      </li>
+    `;
+    return;
+  }
+
+  const items = orchestratorTimelineItems
+    .map((entry) => {
+      return `
+        <li class="agent-timeline-item">
+          <span class="agent-timeline-time">${escapeHtml(formatTimelineTime(entry.ts))}</span>
+          <span class="agent-timeline-label">${escapeHtml(entry.label)}</span>
+        </li>
+      `;
+    })
+    .join("");
+  agentTimelineEl.innerHTML = items;
+  agentTimelineEl.scrollTop = agentTimelineEl.scrollHeight;
+}
+
+function parseTimelineEventFromLogLine(text) {
+  const line = String(text || "").trim();
+  if (!line) {
+    return null;
+  }
+
+  if (/^==\s*PLAN AGENT\s*==$/i.test(line)) {
+    return { key: "phase-plan", label: "Plan phase started" };
+  }
+  if (/^==\s*IMPLEMENTATION AGENT\s*==$/i.test(line)) {
+    return { key: "phase-implementation", label: "Implementation phase started" };
+  }
+  if (/^==\s*TEST AGENT\s*==$/i.test(line)) {
+    return { key: "phase-test", label: "Test phase started" };
+  }
+  if (/^Complexity routing:/i.test(line)) {
+    return { key: "complexity-routing", label: line };
+  }
+  if (/^Phase sub-agent budgets:/i.test(line)) {
+    return { key: "phase-subagent-budgets", label: line };
+  }
+  if (/^Watch mode: issue .* currently /i.test(line)) {
+    return { key: "watch-active", label: line };
+  }
+  if (/^Watch mode: issue .* is completed/i.test(line)) {
+    return { key: "watch-completed", label: line };
+  }
+  if (/^PR URL:/i.test(line)) {
+    return { key: "pr-url", label: line };
+  }
+  if (/^Run artifacts:/i.test(line)) {
+    return { key: "run-artifacts", label: line };
+  }
+  if (/^Orchestration completed\.$/i.test(line)) {
+    return { key: "orchestration-completed", label: "Orchestration completed" };
+  }
+  if (/^Orchestration failed:/i.test(line)) {
+    return { key: "orchestration-failed", label: line };
+  }
+
+  return null;
+}
+
+function appendTimelineFromLog(ts, text) {
+  const timelineEvent = parseTimelineEventFromLogLine(text);
+  if (!timelineEvent) {
+    return;
+  }
+
+  addOrchestratorTimelineEntry({
+    ts,
+    key: timelineEvent.key,
+    label: timelineEvent.label
+  });
+}
+
+function syncTimelineFromRunLogs(runLogs) {
+  if (!Array.isArray(runLogs)) {
+    return;
+  }
+
+  runLogs.forEach((entry) => {
+    appendTimelineFromLog(entry?.ts, entry?.text);
+  });
+}
+
+function appendTimelineForRunState(run) {
+  const runId = String(run?.runId || "");
+  if (!runId) {
+    return;
+  }
+  const state = String(run?.state || "").toLowerCase();
+  if (!state) {
+    return;
+  }
+
+  const labelByState = {
+    starting: "Run started",
+    running: "Run running",
+    stopping: "Stop requested",
+    completed: "Run completed",
+    failed: run?.error ? `Run failed: ${run.error}` : "Run failed",
+    stopped: "Run stopped"
+  };
+  const label = labelByState[state];
+  if (!label) {
+    return;
+  }
+
+  const eventTs =
+    state === "starting"
+      ? run.startedAt || new Date().toISOString()
+      : state === "completed" || state === "failed" || state === "stopped"
+        ? run.endedAt || new Date().toISOString()
+        : new Date().toISOString();
+
+  addOrchestratorTimelineEntry({
+    ts: eventTs,
+    key: `state-${state}`,
+    label
+  });
+}
+
+function parsePollSeconds() {
+  const raw = String(agentPollSecondsInput?.value || "").trim();
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 5) {
+    return 30;
+  }
+  return parsed;
+}
+
+function validateOrchestratorInputs() {
+  const taskId = String(agentTaskIdInput?.value || "").trim();
+  const taskTitle = String(agentTaskTitleInput?.value || "").trim();
+  const ticketBrief = String(agentTicketBriefInput?.value || "").trim();
+  const watchUntilDone = Boolean(agentWatchUntilDoneInput?.checked);
+  const linearIssue = String(agentLinearIssueInput?.value || "").trim().toUpperCase();
+  const dryRun = Boolean(agentDryRunInput?.checked);
+  const allowDirty = Boolean(agentAllowDirtyInput?.checked);
+  const pollSeconds = parsePollSeconds();
+
+  if (!taskId) {
+    throw new Error("enter a task ID");
+  }
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(taskId)) {
+    throw new Error("task ID format is invalid");
+  }
+  if (!taskTitle) {
+    throw new Error("enter a task title");
+  }
+  if (!ticketBrief) {
+    throw new Error("enter a ticket brief");
+  }
+  if (watchUntilDone && !linearIssue) {
+    throw new Error("enter a Linear issue when watch mode is enabled");
+  }
+
+  if (agentLinearIssueInput) {
+    agentLinearIssueInput.value = linearIssue;
+  }
+
+  return {
+    taskId,
+    taskTitle,
+    ticketBrief,
+    linearIssue,
+    watchUntilDone,
+    pollSeconds,
+    dryRun,
+    allowDirty
+  };
+}
+
+async function startOrchestratorRunFromInputs() {
+  if (!window.monitor?.orchestrator) {
+    setAgentStatusMessage("orchestrator runtime unavailable");
+    return;
+  }
+
+  try {
+    const payload = validateOrchestratorInputs();
+    setAgentStatusMessage("starting run...");
+    setAgentRunMetaMessage("Run metadata: launching orchestrator");
+    updateOrchestratorButtons("starting");
+    resetOrchestratorTimeline("");
+    addOrchestratorTimelineEntry({
+      ts: new Date().toISOString(),
+      key: `launch-request-${Date.now()}`,
+      label: `Run launch requested for ${payload.taskId}`
+    });
+    orchestratorLogLines = [];
+    renderOrchestratorLogs();
+
+    const result = await window.monitor.orchestrator.start(payload);
+    const run = result?.run;
+    if (!run) {
+      throw new Error("orchestrator did not return run metadata");
+    }
+    applyOrchestratorRunSnapshot(run);
+    updateLastRefresh("Agents");
+  } catch (error) {
+    setAgentStatusMessage(errorMessage(error));
+    updateOrchestratorButtons("idle");
+  }
+}
+
+async function stopActiveOrchestratorRun() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  if (!activeOrchestratorRunId) {
+    setAgentStatusMessage("no active run to stop");
+    return;
+  }
+
+  try {
+    setAgentStatusMessage("stopping run...");
+    addOrchestratorTimelineEntry({
+      ts: new Date().toISOString(),
+      key: `operator-stop-${activeOrchestratorRunId}`,
+      label: "Operator requested stop"
+    });
+    updateOrchestratorButtons("stopping");
+    const result = await window.monitor.orchestrator.stop(activeOrchestratorRunId);
+    const run = result?.run;
+    if (run) {
+      applyOrchestratorRunSnapshot(run);
+    }
+  } catch (error) {
+    setAgentStatusMessage(`stop failed: ${errorMessage(error)}`);
+  }
+}
+
+async function refreshOrchestratorStatus() {
+  if (!window.monitor?.orchestrator) {
+    return;
+  }
+  try {
+    const status = await window.monitor.orchestrator.status(activeOrchestratorRunId || undefined);
+    if (status?.activeRun) {
+      applyOrchestratorRunSnapshot(status.activeRun);
+      return;
+    }
+    const mostRecent = Array.isArray(status?.recentRuns) ? status.recentRuns[0] : null;
+    if (mostRecent) {
+      applyOrchestratorRunSnapshot(mostRecent);
+      return;
+    }
+    activeOrchestratorRunId = "";
+    setAgentStatusMessage("idle");
+    setAgentRunMetaMessage("Run metadata: none");
+    resetOrchestratorTimeline("");
+    updateOrchestratorButtons("idle");
+  } catch (error) {
+    setAgentStatusMessage(`status load failed: ${errorMessage(error)}`);
+    updateOrchestratorButtons("idle");
+  }
+}
+
+function applyOrchestratorRunSnapshot(run) {
+  if (!run) {
+    return;
+  }
+
+  activeOrchestratorRunId = String(run.runId || "");
+  if (activeOrchestratorRunId && activeOrchestratorRunId !== timelineRunId) {
+    resetOrchestratorTimeline(activeOrchestratorRunId);
+    addOrchestratorTimelineEntry({
+      ts: run.startedAt || new Date().toISOString(),
+      key: `run-selected-${activeOrchestratorRunId}`,
+      label: `Tracking run ${run.taskId || activeOrchestratorRunId}`
+    });
+  }
+
+  const state = String(run.state || "unknown");
+  const runLabel = run.taskId ? `${run.taskId} (${activeOrchestratorRunId})` : activeOrchestratorRunId;
+  const errorText = run.error ? ` | error: ${run.error}` : "";
+  setAgentStatusMessage(`${state}${errorText}`);
+
+  const metadata = [
+    `Run metadata: ${runLabel || "n/a"}`,
+    `state=${state}`,
+    run.linearIssue ? `linear=${run.linearIssue}` : "linear=none",
+    run.watchUntilDone ? `watch=true@${run.pollSeconds || 30}s` : "watch=false",
+    run.runArtifactsPath ? `artifacts=${run.runArtifactsPath}` : "artifacts=pending",
+    run.prUrl ? `pr=${run.prUrl}` : "pr=none"
+  ].join(" | ");
+  setAgentRunMetaMessage(metadata);
+
+  if (Array.isArray(run.logs)) {
+    orchestratorLogLines = run.logs
+      .map((entry) => formatOrchestratorLogLine(entry?.ts, entry?.stream, entry?.text))
+      .filter(Boolean)
+      .slice(-ORCHESTRATOR_LOG_MAX);
+    renderOrchestratorLogs();
+    syncTimelineFromRunLogs(run.logs);
+  }
+
+  appendTimelineForRunState(run);
+  updateOrchestratorButtons(state);
+}
+
+function handleOrchestratorEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+
+  if (event.type === "state") {
+    const run = event.run;
+    if (!run) {
+      return;
+    }
+    if (activeOrchestratorRunId && run.runId !== activeOrchestratorRunId && !isRunTerminal(run.state)) {
+      return;
+    }
+    applyOrchestratorRunSnapshot(run);
+    return;
+  }
+
+  if (event.type === "log") {
+    if (!event.runId) {
+      return;
+    }
+    if (activeOrchestratorRunId && event.runId !== activeOrchestratorRunId) {
+      return;
+    }
+    if (!activeOrchestratorRunId) {
+      activeOrchestratorRunId = event.runId;
+    }
+    if (!timelineRunId) {
+      timelineRunId = event.runId;
+    }
+    appendOrchestratorLogLine(event.ts, event.stream, event.text);
+    appendTimelineFromLog(event.ts, event.text);
+  }
+}
+
+function isRunTerminal(state) {
+  return state === "completed" || state === "failed" || state === "stopped";
+}
+
+function updateOrchestratorButtons(state) {
+  const isActive = ORCHESTRATOR_ACTIVE_STATES.has(state);
+  if (agentStartRunBtn) {
+    agentStartRunBtn.disabled = isActive;
+  }
+  if (agentStopRunBtn) {
+    agentStopRunBtn.disabled = !isActive || !activeOrchestratorRunId;
+  }
+}
+
+function formatOrchestratorLogLine(ts, stream, text) {
+  const timestamp = ts ? new Date(ts) : null;
+  const prefix = timestamp && !Number.isNaN(timestamp.getTime()) ? timestamp.toLocaleTimeString() : "--:--:--";
+  const streamLabel = String(stream || "log").toLowerCase();
+  const line = String(text || "").trim();
+  if (!line) {
+    return "";
+  }
+  return `[${prefix}] ${streamLabel}: ${line}`;
+}
+
+function appendOrchestratorLogLine(ts, stream, text) {
+  const line = formatOrchestratorLogLine(ts, stream, text);
+  if (!line) {
+    return;
+  }
+  orchestratorLogLines.push(line);
+  if (orchestratorLogLines.length > ORCHESTRATOR_LOG_MAX) {
+    orchestratorLogLines.splice(0, orchestratorLogLines.length - ORCHESTRATOR_LOG_MAX);
+  }
+  renderOrchestratorLogs();
+}
+
+function renderOrchestratorLogs() {
+  if (!agentLogsEl) {
+    return;
+  }
+  if (!orchestratorLogLines.length) {
+    agentLogsEl.textContent = "No orchestrator output yet.";
+    return;
+  }
+  agentLogsEl.textContent = orchestratorLogLines.join("\\n");
+  agentLogsEl.scrollTop = agentLogsEl.scrollHeight;
+}
+
+function initializeManagedServerControls() {
+  if (!managedServerStatusEl || !managedServerListEl || !managedServerLogsEl) {
+    return;
+  }
+
+  if (!window.monitor?.managedServers) {
+    setManagedServerStatusMessage("runtime unavailable in preload");
+    return;
+  }
+
+  if (managedServerSaveBtn) {
+    managedServerSaveBtn.addEventListener("click", () => {
+      void saveManagedServerFromInputs();
+    });
+  }
+  if (managedServerClearBtn) {
+    managedServerClearBtn.addEventListener("click", clearManagedServerForm);
+  }
+  managedServerListEl.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const action = target.dataset.action;
+    const serverId = target.dataset.serverId;
+    if (!action || !serverId) {
+      return;
+    }
+    void handleManagedServerAction(action, serverId);
+  });
+
+  if (!managedServerEventUnsubscribe) {
+    managedServerEventUnsubscribe = window.monitor.managedServers.subscribe(handleManagedServerEvent);
+  }
+
+  void refreshManagedServers();
+}
+
+function setManagedServerStatusMessage(message) {
+  if (managedServerStatusEl) {
+    managedServerStatusEl.textContent = `Managed servers: ${message}`;
+  }
+}
+
+function clearManagedServerForm() {
+  if (managedServerIdInput) {
+    managedServerIdInput.value = "";
+  }
+  if (managedServerNameInput) {
+    managedServerNameInput.value = "";
+  }
+  if (managedServerCommandInput) {
+    managedServerCommandInput.value = "";
+  }
+  if (managedServerArgsInput) {
+    managedServerArgsInput.value = "";
+  }
+  if (managedServerCwdInput) {
+    managedServerCwdInput.value = "";
+  }
+}
+
+function validateManagedServerInputs() {
+  const id = String(managedServerIdInput?.value || "").trim();
+  const name = String(managedServerNameInput?.value || "").trim();
+  const command = String(managedServerCommandInput?.value || "").trim();
+  const argsText = String(managedServerArgsInput?.value || "").trim();
+  const cwd = String(managedServerCwdInput?.value || "").trim();
+
+  if (!name) {
+    throw new Error("enter a server name");
+  }
+  if (!command) {
+    throw new Error("enter a server command");
+  }
+
+  return {
+    id,
+    name,
+    command,
+    argsText,
+    cwd
+  };
+}
+
+async function saveManagedServerFromInputs() {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+  try {
+    const payload = validateManagedServerInputs();
+    if (managedServerSaveBtn) {
+      managedServerSaveBtn.disabled = true;
+    }
+    const isUpdate = Boolean(payload.id);
+    const result = isUpdate
+      ? await window.monitor.managedServers.update(payload)
+      : await window.monitor.managedServers.create(payload);
+    applyManagedServerList(result?.servers || []);
+    const targetId = result?.server?.id || payload.id;
+    if (targetId) {
+      selectedManagedServerId = targetId;
+      renderManagedServerLogs();
+    }
+    setManagedServerStatusMessage(isUpdate ? "server updated" : "server created");
+    updateLastRefresh("Managed servers");
+    clearManagedServerForm();
+  } catch (error) {
+    setManagedServerStatusMessage(errorMessage(error));
+  } finally {
+    if (managedServerSaveBtn) {
+      managedServerSaveBtn.disabled = false;
+    }
+  }
+}
+
+async function handleManagedServerAction(action, serverId) {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+
+  try {
+    if (action === "select") {
+      selectedManagedServerId = serverId;
+      renderManagedServerList();
+      renderManagedServerLogs();
+      return;
+    }
+
+    if (action === "edit") {
+      const server = managedServersById.get(serverId);
+      if (!server) {
+        return;
+      }
+      if (managedServerIdInput) {
+        managedServerIdInput.value = server.id;
+      }
+      if (managedServerNameInput) {
+        managedServerNameInput.value = server.name;
+      }
+      if (managedServerCommandInput) {
+        managedServerCommandInput.value = server.command;
+      }
+      if (managedServerArgsInput) {
+        managedServerArgsInput.value = server.argsText || "";
+      }
+      if (managedServerCwdInput) {
+        managedServerCwdInput.value = server.cwd || "";
+      }
+      setManagedServerStatusMessage(`editing ${server.name}`);
+      return;
+    }
+
+    let result = null;
+    if (action === "start") {
+      result = await window.monitor.managedServers.start(serverId);
+      setManagedServerStatusMessage("server starting");
+    } else if (action === "stop") {
+      result = await window.monitor.managedServers.stop(serverId);
+      setManagedServerStatusMessage("server stopping");
+    } else if (action === "remove") {
+      const server = managedServersById.get(serverId);
+      const label = server?.name || serverId;
+      if (!window.confirm(`Remove managed server "${label}"?`)) {
+        return;
+      }
+      result = await window.monitor.managedServers.remove(serverId);
+      if (selectedManagedServerId === serverId) {
+        selectedManagedServerId = "";
+      }
+      setManagedServerStatusMessage("server removed");
+    } else {
+      return;
+    }
+
+    applyManagedServerList(result?.servers || []);
+    renderManagedServerLogs();
+    updateLastRefresh("Managed servers");
+  } catch (error) {
+    setManagedServerStatusMessage(errorMessage(error));
+  }
+}
+
+async function refreshManagedServers() {
+  if (!window.monitor?.managedServers) {
+    return;
+  }
+  try {
+    const result = await window.monitor.managedServers.list();
+    applyManagedServerList(result?.servers || []);
+    if (result?.server?.id) {
+      selectedManagedServerId = result.server.id;
+    }
+    renderManagedServerLogs();
+    setManagedServerStatusMessage("ready");
+  } catch (error) {
+    setManagedServerStatusMessage(`load failed: ${errorMessage(error)}`);
+  }
+}
+
+function applyManagedServerState(server) {
+  if (!server || !server.id) {
+    return;
+  }
+  managedServersById.set(server.id, server);
+  if (!selectedManagedServerId) {
+    selectedManagedServerId = server.id;
+  }
+  renderManagedServerList();
+  if (selectedManagedServerId === server.id) {
+    renderManagedServerLogs();
+  }
+}
+
+function applyManagedServerList(servers) {
+  managedServersById = new Map();
+  (Array.isArray(servers) ? servers : []).forEach((server) => {
+    if (server?.id) {
+      managedServersById.set(server.id, server);
+    }
+  });
+  if (selectedManagedServerId && !managedServersById.has(selectedManagedServerId)) {
+    selectedManagedServerId = "";
+  }
+  if (!selectedManagedServerId && managedServersById.size > 0) {
+    selectedManagedServerId = Array.from(managedServersById.keys())[0];
+  }
+  renderManagedServerList();
+}
+
+function handleManagedServerEvent(event) {
+  if (!event || typeof event !== "object") {
+    return;
+  }
+  if (event.type === "removed") {
+    const removedId = String(event.serverId || "");
+    if (removedId) {
+      managedServersById.delete(removedId);
+      if (selectedManagedServerId === removedId) {
+        selectedManagedServerId = "";
+      }
+      renderManagedServerList();
+      renderManagedServerLogs();
+    }
+    return;
+  }
+
+  if (event.type === "state" && event.server) {
+    applyManagedServerState(event.server);
+  }
+
+  if (event.type === "log" && event.serverId) {
+    const server = managedServersById.get(event.serverId);
+    if (!server) {
+      return;
+    }
+    const nextLogs = Array.isArray(server.logs) ? [...server.logs] : [];
+    nextLogs.push({
+      ts: event.ts,
+      stream: event.stream,
+      text: event.text
+    });
+    server.logs = nextLogs.slice(-300);
+    managedServersById.set(server.id, server);
+    if (selectedManagedServerId === server.id) {
+      renderManagedServerLogs();
+    }
+  }
+}
+
+function renderManagedServerList() {
+  if (!managedServerListEl) {
+    return;
+  }
+  const servers = Array.from(managedServersById.values()).sort((left, right) =>
+    String(left.name || "").localeCompare(String(right.name || ""))
+  );
+  if (!servers.length) {
+    managedServerListEl.innerHTML = '<p class="graph-details-placeholder">No managed servers yet.</p>';
+    return;
+  }
+
+  managedServerListEl.innerHTML = servers
+    .map((server) => {
+      const isSelected = server.id === selectedManagedServerId;
+      const rawStatus = String(server.status || "unknown").toLowerCase();
+      const statusClass = rawStatus.replace(/[^a-z0-9-]/g, "-");
+      const status = escapeHtml(rawStatus);
+      const name = escapeHtml(server.name || server.id);
+      const command = escapeHtml(server.command || "");
+      const argsText = escapeHtml(server.argsText || "");
+      const pidText = Number.isInteger(server.pid) ? String(server.pid) : "n/a";
+      const runText = server.lastRunAt ? escapeHtml(formatDate(server.lastRunAt)) : "never";
+      const canStart = server.status !== "running" && server.status !== "starting";
+      const canStop = server.status === "running" || server.status === "starting" || server.status === "stopping";
+
+      return `
+        <article class="managed-server-item ${isSelected ? "is-selected" : ""}">
+          <div class="managed-server-head">
+            <button type="button" data-action="select" data-server-id="${escapeAttribute(server.id)}">${name}</button>
+            <span class="managed-server-pill state-${statusClass}">${status}</span>
+          </div>
+          <p class="managed-server-command"><code>${command}${argsText ? ` ${argsText}` : ""}</code></p>
+          <p class="managed-server-meta">pid=${pidText} | last run=${runText}</p>
+          <div class="managed-server-actions">
+            <button type="button" data-action="start" data-server-id="${escapeAttribute(server.id)}" ${canStart ? "" : "disabled"}>Start</button>
+            <button type="button" data-action="stop" data-server-id="${escapeAttribute(server.id)}" ${canStop ? "" : "disabled"}>Stop</button>
+            <button type="button" data-action="edit" data-server-id="${escapeAttribute(server.id)}">Edit</button>
+            <button type="button" data-action="remove" data-server-id="${escapeAttribute(server.id)}">Remove</button>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderManagedServerLogs() {
+  if (!managedServerLogsEl) {
+    return;
+  }
+  if (!selectedManagedServerId) {
+    managedServerLogsEl.textContent = "Select a server to view logs.";
+    return;
+  }
+  const server = managedServersById.get(selectedManagedServerId);
+  if (!server) {
+    managedServerLogsEl.textContent = "Select a server to view logs.";
+    return;
+  }
+  const logs = Array.isArray(server.logs) ? server.logs : [];
+  if (!logs.length) {
+    managedServerLogsEl.textContent = `No logs yet for ${server.name}.`;
+    return;
+  }
+  managedServerLogsEl.textContent = logs
+    .map((entry) => formatOrchestratorLogLine(entry?.ts, entry?.stream, entry?.text))
+    .join("\n");
+  managedServerLogsEl.scrollTop = managedServerLogsEl.scrollHeight;
 }

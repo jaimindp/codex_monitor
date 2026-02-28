@@ -122,7 +122,123 @@
         </main>
 
         <main class="screen-panel" data-screen-panel="agents">
-          <div class="card"><h3>Agents</h3><p>Agents panel placeholder.</p></div>
+          <div class="card agents-card">
+            <header class="agents-header">
+              <h3>Orchestrator Agent</h3>
+              <p>Run ticket orchestration and optionally watch until a Linear issue is done.</p>
+            </header>
+            <div class="agents-grid">
+              <section class="agents-form-panel">
+                <label for="agent-task-id">Task ID</label>
+                <input id="agent-task-id" type="text" placeholder="hack-39" value="hack-39" />
+
+                <label for="agent-task-title">Task Title</label>
+                <input
+                  id="agent-task-title"
+                  type="text"
+                  placeholder="automated-repo-intake-and-planning"
+                  value="automated-repo-intake-and-planning"
+                />
+
+                <label for="agent-ticket-brief">Ticket Brief</label>
+                <textarea
+                  id="agent-ticket-brief"
+                  rows="6"
+                  placeholder="Describe scope, constraints, and acceptance criteria..."
+                ></textarea>
+
+                <label for="agent-linear-issue">Linear Issue (for watch mode)</label>
+                <input id="agent-linear-issue" type="text" placeholder="HACK-34" value="HACK-34" />
+
+                <div class="agents-options-row">
+                  <label class="checkbox-row" for="agent-watch-until-done">
+                    <input id="agent-watch-until-done" type="checkbox" checked />
+                    Watch until issue is done
+                  </label>
+                  <label class="checkbox-row" for="agent-dry-run">
+                    <input id="agent-dry-run" type="checkbox" />
+                    Dry run
+                  </label>
+                  <label class="checkbox-row" for="agent-allow-dirty">
+                    <input id="agent-allow-dirty" type="checkbox" checked />
+                    Allow dirty tree
+                  </label>
+                </div>
+
+                <label for="agent-poll-seconds">Watch Poll Seconds</label>
+                <input id="agent-poll-seconds" type="number" min="5" step="1" value="30" />
+
+                <div class="row">
+                  <button id="agent-start-run" type="button">Start Orchestrator</button>
+                  <button id="agent-stop-run" type="button">Stop Run</button>
+                </div>
+
+                <p id="agent-status" class="settings-status">Agent status: idle</p>
+                <p id="agent-run-meta" class="graph-details-placeholder">Run metadata: none</p>
+              </section>
+
+              <section class="agents-log-panel">
+                <h4>Run Timeline</h4>
+                <ol id="agent-timeline" class="agent-timeline">
+                  <li class="agent-timeline-item is-placeholder">
+                    <span class="agent-timeline-label">No timeline events yet.</span>
+                  </li>
+                </ol>
+                <details class="agent-logs-disclosure">
+                  <summary>Raw Logs</summary>
+                  <pre id="agent-logs" class="logs">No orchestrator output yet.</pre>
+                </details>
+              </section>
+
+              <section class="agents-managed-panel">
+                <header class="agents-managed-header">
+                  <h4>Managed Local Servers</h4>
+                  <p>Create server entries, then start, stop, or remove them from this app.</p>
+                </header>
+
+                <div class="managed-server-layout">
+                  <section class="managed-server-form-panel">
+                    <input id="managed-server-id" type="hidden" />
+
+                    <label for="managed-server-name">Name</label>
+                    <input id="managed-server-name" type="text" placeholder="Codex App Server" />
+
+                    <label for="managed-server-command">Command</label>
+                    <input id="managed-server-command" type="text" placeholder="codex" />
+
+                    <label for="managed-server-args">Arguments</label>
+                    <input
+                      id="managed-server-args"
+                      type="text"
+                      placeholder="app-server --port 3333"
+                    />
+
+                    <label for="managed-server-cwd">Working Directory (optional)</label>
+                    <input id="managed-server-cwd" type="text" placeholder="/absolute/path" />
+
+                    <div class="row">
+                      <button id="managed-server-save" type="button">Save Server</button>
+                      <button id="managed-server-clear" type="button">Clear Form</button>
+                    </div>
+
+                    <p id="managed-server-status" class="settings-status">Managed servers: idle</p>
+                  </section>
+
+                  <section class="managed-server-list-panel">
+                    <h5>Saved Servers</h5>
+                    <div id="managed-server-list" class="managed-server-list">
+                      No managed servers yet.
+                    </div>
+                  </section>
+                </div>
+
+                <section class="managed-server-logs-panel">
+                  <h5>Selected Server Logs</h5>
+                  <pre id="managed-server-logs" class="logs">Select a server to view logs.</pre>
+                </section>
+              </section>
+            </div>
+          </div>
         </main>
 
         <main class="screen-panel" data-screen-panel="usage">
