@@ -279,14 +279,11 @@ function createWindow() {
 
 app.whenReady().then(() => {
   try {
-    monitorDataService = createMonitorDataService({
-      userDataPath: app.getPath("userData")
-    });
+    monitorDataService = createMonitorDataService();
   } catch (error) {
     monitorDataService = null;
     console.error("Monitor data service startup failed:", error);
   }
-
   ipcMain.handle("linear-settings:get", () => getLinearSettings());
   ipcMain.handle("linear-settings:save", (_event, settings) =>
     saveLinearSettings(settings?.apiKey, settings?.teamKey)

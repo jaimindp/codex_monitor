@@ -6,11 +6,17 @@ const { DatabaseSync } = require("node:sqlite");
 
 const HISTORY_FILE = "history.jsonl";
 const SESSIONS_DIR = "sessions";
+const SHARED_MONITOR_DIR = ".monitor";
+const SHARED_MONITOR_DB = "monitor.sqlite";
 
 function createMonitorDataService(options = {}) {
   const userDataPath = options.userDataPath;
   const codexHome = options.codexHome || path.join(os.homedir(), ".codex");
-  const dbPath = path.join(userDataPath, "monitor.sqlite");
+  const defaultDbPath = userDataPath
+    ? path.join(userDataPath, SHARED_MONITOR_DB)
+    : path.join(os.homedir(), SHARED_MONITOR_DIR, SHARED_MONITOR_DB);
+  const dbPath = resolvePath(options.dbPath || process.env.MONITOR_DB_PATH || defaultDbPath);
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
 
   db.exec("PRAGMA journal_mode = WAL;");
@@ -22,9 +28,23 @@ function createMonitorDataService(options = {}) {
     dbPath,
     codexHome,
     runIngestion: () => runIngestion(db, codexHome),
-    getDashboard: () => getDashboard(db, codexHome),
+    getDashboard: () => getDashboard(db, codexHome, dbPath),
     close: () => db.close()
   };
+}
+
+function resolvePath(rawPath) {
+  const input = String(rawPath || "").trim();
+  if (!input) {
+    return path.join(os.homedir(), SHARED_MONITOR_DIR, SHARED_MONITOR_DB);
+  }
+  if (input === "~") {
+    return os.homedir();
+  }
+  if (input.startsWith("~/")) {
+    return path.join(os.homedir(), input.slice(2));
+  }
+  return path.resolve(input);
 }
 
 function initializeSchema(db) {
@@ -203,7 +223,7 @@ function runIngestion(db, codexHome) {
   };
 }
 
-function getDashboard(db, codexHome) {
+function getDashboard(db, codexHome, dbPath) {
   const nowTs = Math.floor(Date.now() / 1000);
   const oneDayAgo = nowTs - 24 * 60 * 60;
 
@@ -287,6 +307,7 @@ function getDashboard(db, codexHome) {
       estimatedCostUsd: Number(row.estimated_cost_usd || 0)
     })),
     health: {
+      dbPath,
       codexHome: dbStats.codexHome,
       historyPresent: dbStats.historyPresent,
       lastIngestAt: Number(ingestState?.updated_at || 0),

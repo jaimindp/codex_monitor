@@ -25,6 +25,7 @@ const graphNavHintEl = document.getElementById("graph-nav-hint");
 const screenTitleEl = document.getElementById("screen-title");
 const screenSubtitleEl = document.getElementById("screen-subtitle");
 const lastRefreshValueEl = document.getElementById("last-refresh-value");
+const monitorRefreshDashboardBtn = document.getElementById("monitor-refresh-dashboard");
 const monitorRunIngestionBtn = document.getElementById("monitor-run-ingestion");
 const monitorIngestStatusEl = document.getElementById("monitor-ingest-status");
 const metricTotalEventsEl = document.getElementById("metric-total-events");
@@ -294,8 +295,25 @@ async function initializeMonitorData() {
   if (monitorRunIngestionBtn) {
     monitorRunIngestionBtn.addEventListener("click", runManualIngestion);
   }
+  if (monitorRefreshDashboardBtn) {
+    monitorRefreshDashboardBtn.addEventListener("click", refreshDashboardView);
+  }
 
   await refreshDashboardFromDb();
+}
+
+async function refreshDashboardView() {
+  if (monitorRefreshDashboardBtn) {
+    monitorRefreshDashboardBtn.disabled = true;
+  }
+  try {
+    await refreshDashboardFromDb();
+    updateLastRefresh("Overview (cached)");
+  } finally {
+    if (monitorRefreshDashboardBtn) {
+      monitorRefreshDashboardBtn.disabled = false;
+    }
+  }
 }
 
 async function runManualIngestion() {
@@ -407,6 +425,7 @@ function renderHealthSummary(health) {
     : "never";
 
   healthSummaryEl.innerHTML = `
+    <div class="health-row"><span>Shared DB</span><strong>${escapeHtml(health.dbPath || "n/a")}</strong></div>
     <div class="health-row"><span>Codex home</span><strong>${escapeHtml(health.codexHome || "n/a")}</strong></div>
     <div class="health-row"><span>History file</span><strong>${health.historyPresent ? "present" : "missing"}</strong></div>
     <div class="health-row"><span>Last ingest source</span><strong>${escapeHtml(health.lastIngestSource || "n/a")}</strong></div>

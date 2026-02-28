@@ -97,3 +97,6 @@ rm -rf "docs/worktrees/${BRANCH}"
 ## Notes
 - Do not copy `node_modules` or build artifacts between worktrees.
 - Keep environment files scoped to each worktree when needed.
+- Monitor runtime DB is shared by default across worktrees at `~/.monitor/monitor.sqlite`.
+- New worktrees should reuse that DB; no DB copy is required.
+- Use `MONITOR_DB_PATH=/absolute/path/to/monitor.sqlite npm run start` only when you need a custom shared DB location.
